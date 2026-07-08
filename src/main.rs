@@ -2,11 +2,17 @@ use std::io::{self, Write};
 
 use crossterm::{
     cursor, execute, queue,
-    style::{self, Stylize},
+    style::{self, Color, Stylize},
     terminal::{
         self, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     },
 };
+
+#[derive(Clone)]
+struct Pixel {
+    ch: char,
+    color: Color,
+}
 
 fn main() -> io::Result<()> {
     let mut stdout = io::stdout();
@@ -26,23 +32,52 @@ fn main() -> io::Result<()> {
     let start_col = cols.saturating_sub(board_width) / 4;
     let start_row = rows.saturating_sub(board_height) / 2;
 
-    for y in 0..board_height {
-        let leading_spaces = y;
-        let cursor_pos_x = start_col + leading_spaces;
+    let mut screen_buffer = vec![
+        vec![
+            Pixel {
+                ch: ' ',
+                color: Color::Reset
+            };
+            cols as usize
+        ];
+        rows as usize
+    ];
 
-        queue!(stdout, cursor::MoveTo(cursor_pos_x, start_row + y))?;
-        for _ in 0..board_width {
-            if y % 2 == 0 {
-                queue!(stdout, style::PrintStyledContent("/".magenta()))?;
-            } else {
-                queue!(stdout, style::PrintStyledContent("_".magenta()))?;
+    // update screen frame buffer
+    for y in 0..board_height {
+        let target_y = (start_row + y) as usize;
+        for x in 0..board_width {
+            let target_x = (start_col + x + y) as usize;
+            if target_x < cols as usize && target_y < rows as usize {
+                if target_x % 2 == 0 {
+                    screen_buffer[target_y][target_x] = Pixel {
+                        ch: '\\',
+                        color: Color::Red,
+                    }
+                } else {
+                    screen_buffer[target_y][target_x] = Pixel {
+                        ch: '_',
+                        color: Color::Red,
+                    }
+                }
             }
+        }
+    }
+
+    // render the buffer to the terminal
+    for (y, row) in screen_buffer.iter().enumerate() {
+        queue!(stdout, cursor::MoveTo(0, y as u16))?;
+        for pixel in row {
+            queue!(
+                stdout,
+                style::PrintStyledContent(pixel.ch.with(pixel.color))
+            )?;
         }
     }
 
     stdout.flush()?;
 
-    std::thread::sleep(std::time::Duration::from_hours(3));
+    std::thread::sleep(std::time::Duration::from_secs(10));
 
     execute!(stdout, cursor::Show, LeaveAlternateScreen)?;
     disable_raw_mode()?;
