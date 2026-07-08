@@ -26,8 +26,8 @@ fn main() -> io::Result<()> {
     )?;
 
     let (cols, rows) = terminal::size()?;
-    let board_width = 40;
-    let board_height = 30;
+    let board_width = 30;
+    let board_height = 20;
 
     let start_col = cols.saturating_sub(board_width) / 4;
     let start_row = rows.saturating_sub(board_height) / 2;
@@ -44,21 +44,14 @@ fn main() -> io::Result<()> {
     ];
 
     // update screen frame buffer
-    for y in 0..board_height {
+    for y in 0..board_height + 1 {
         let target_y = (start_row + y) as usize;
         for x in 0..board_width {
             let target_x = (start_col + x + y) as usize;
             if target_x < cols as usize && target_y < rows as usize {
-                if target_x % 2 == 0 {
-                    screen_buffer[target_y][target_x] = Pixel {
-                        ch: '\\',
-                        color: Color::Red,
-                    }
-                } else {
-                    screen_buffer[target_y][target_x] = Pixel {
-                        ch: '_',
-                        color: Color::Red,
-                    }
+                screen_buffer[target_y][target_x] = Pixel {
+                    ch: '_',
+                    color: Color::White,
                 }
             }
         }
@@ -84,4 +77,54 @@ fn main() -> io::Result<()> {
 
     println!("cols: {} rows: {}", start_col, start_row);
     Ok(())
+}
+
+fn draw_block(
+    screen_buffer: &mut Vec<Vec<Pixel>>,
+    start_row: usize,
+    start_col: usize,
+    mut pos_x: usize,
+    pos_y: usize,
+) {
+    // check if the max col/row a block occupies is overflowing
+    let rows = screen_buffer.len();
+    let cols = screen_buffer[0].len();
+    if pos_y + 1 + start_row >= rows || pos_x + pos_y + 3 + start_col >= cols {
+        return;
+    }
+
+    pos_x *= 3;
+    screen_buffer[pos_y + start_row][pos_x + pos_y + start_col] = Pixel {
+        ch: '/',
+        color: Color::Blue,
+    };
+    screen_buffer[pos_y + start_row][pos_x + pos_y + 1 + start_col] = Pixel {
+        ch: '\\',
+        color: Color::Blue,
+    };
+
+    screen_buffer[pos_y + start_row][pos_x + pos_y + 2 + start_col] = Pixel {
+        ch: '\\',
+        color: Color::Blue,
+    };
+    screen_buffer[pos_y + start_row][pos_x + pos_y + 3 + start_col] = Pixel {
+        ch: '\\',
+        color: Color::Blue,
+    };
+    screen_buffer[pos_y + 1 + start_row][pos_x + pos_y + start_col] = Pixel {
+        ch: '\\',
+        color: Color::Blue,
+    };
+    screen_buffer[pos_y + 1 + start_row][pos_x + pos_y + 1 + start_col] = Pixel {
+        ch: '/',
+        color: Color::DarkBlue,
+    };
+    screen_buffer[pos_y + 1 + start_row][pos_x + pos_y + 2 + start_col] = Pixel {
+        ch: '/',
+        color: Color::DarkBlue,
+    };
+    screen_buffer[pos_y + 1 + start_row][pos_x + pos_y + 3 + start_col] = Pixel {
+        ch: '/',
+        color: Color::DarkBlue,
+    };
 }
