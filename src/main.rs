@@ -8,6 +8,82 @@ use crossterm::{
     },
 };
 
+struct Window {
+    window_width: usize,
+    window_height: usize,
+    posx: usize,
+    posy: usize,
+}
+
+impl Window {
+    fn new(width: u16, height: u16, posx: u16, posy: u16) -> Self {
+        return Self {
+            window_width: width as usize,
+            window_height: height as usize,
+            posx: posx as usize,
+            posy: posy as usize,
+        };
+    }
+
+    fn clear(&self, buf: &mut Vec<Vec<Pixel>>) {
+        for y in 0..self.window_height + 1 {
+            let target_y = (self.posy + y) as usize;
+            for x in 0..self.window_width {
+                let target_x = (self.posx + x + y) as usize;
+                if target_x < buf[0].len() as usize && target_y < buf.len() as usize {
+                    buf[target_y][target_x] = Pixel {
+                        ch: '_',
+                        color: Color::White,
+                    }
+                }
+            }
+        }
+    }
+
+    fn add_block(&self, buf: &mut Vec<Vec<Pixel>>, mut posx: usize, posy: usize) {
+        let height = buf.len();
+        let width = buf[0].len();
+        if posy + 1 + self.posy >= height || posx + posy + 3 + self.posx >= width {
+            return;
+        }
+
+        posx *= 3;
+        buf[posy + self.posy][posx + posy + self.posx] = Pixel {
+            ch: '/',
+            color: Color::Blue,
+        };
+        buf[posy + self.posy][posx + posy + 1 + self.posx] = Pixel {
+            ch: '\\',
+            color: Color::Blue,
+        };
+
+        buf[posy + self.posy][posx + posy + 2 + self.posx] = Pixel {
+            ch: '\\',
+            color: Color::Blue,
+        };
+        buf[posy + self.posy][posx + posy + 3 + self.posx] = Pixel {
+            ch: '\\',
+            color: Color::Blue,
+        };
+        buf[posy + 1 + self.posy][posx + posy + self.posx] = Pixel {
+            ch: '\\',
+            color: Color::Blue,
+        };
+        buf[posy + 1 + self.posy][posx + posy + 1 + self.posx] = Pixel {
+            ch: '/',
+            color: Color::DarkBlue,
+        };
+        buf[posy + 1 + self.posy][posx + posy + 2 + self.posx] = Pixel {
+            ch: '_',
+            color: Color::DarkBlue,
+        };
+        buf[posy + 1 + self.posy][posx + posy + 3 + self.posx] = Pixel {
+            ch: '/',
+            color: Color::DarkBlue,
+        };
+    }
+}
+
 #[derive(Clone)]
 struct Pixel {
     ch: char,
@@ -25,12 +101,7 @@ fn main() -> io::Result<()> {
         terminal::Clear(terminal::ClearType::All)
     )?;
 
-    let (cols, rows) = terminal::size()?;
-    let board_width = 30;
-    let board_height = 20;
-
-    let start_col = cols.saturating_sub(board_width) / 4;
-    let start_row = rows.saturating_sub(board_height) / 2;
+    let (screen_width, screen_height) = terminal::size()?;
 
     let mut screen_buffer = vec![
         vec![
@@ -38,24 +109,42 @@ fn main() -> io::Result<()> {
                 ch: ' ',
                 color: Color::Reset
             };
-            cols as usize
+            screen_width as usize
         ];
-        rows as usize
+        screen_height as usize
     ];
 
+    let window_width = 30;
+    let window_height = 20;
+    let posx = screen_width.saturating_sub(window_width) / 4;
+    let posy = screen_height.saturating_sub(window_height) / 2;
+    let game_window = Window::new(window_width, window_height, posx, posy);
+
+    // next piece preview box
+    let next_width = 18;
+    let next_height = 6;
+    let posx = screen_width.saturating_sub(next_width) * 11 / 20;
+    let posy = screen_height.saturating_sub(next_height) / 3;
+    let next_preview_window = Window::new(next_width, next_height, posx, posy);
+
     // update screen frame buffer
-    for y in 0..board_height + 1 {
-        let target_y = (start_row + y) as usize;
-        for x in 0..board_width {
-            let target_x = (start_col + x + y) as usize;
-            if target_x < cols as usize && target_y < rows as usize {
-                screen_buffer[target_y][target_x] = Pixel {
-                    ch: '_',
-                    color: Color::White,
-                }
-            }
-        }
-    }
+    game_window.clear(&mut screen_buffer);
+    next_preview_window.clear(&mut screen_buffer);
+
+    game_window.add_block(&mut screen_buffer, 3, 1);
+    game_window.add_block(&mut screen_buffer, 3, 2);
+    game_window.add_block(&mut screen_buffer, 2, 2);
+    game_window.add_block(&mut screen_buffer, 2, 3);
+
+    game_window.add_block(&mut screen_buffer, 3, 19);
+    game_window.add_block(&mut screen_buffer, 2, 19);
+    game_window.add_block(&mut screen_buffer, 1, 19);
+    game_window.add_block(&mut screen_buffer, 0, 19);
+
+    next_preview_window.add_block(&mut screen_buffer, 3, 1);
+    next_preview_window.add_block(&mut screen_buffer, 3, 2);
+    next_preview_window.add_block(&mut screen_buffer, 2, 2);
+    next_preview_window.add_block(&mut screen_buffer, 2, 3);
 
     // render the buffer to the terminal
     for (y, row) in screen_buffer.iter().enumerate() {
@@ -75,56 +164,6 @@ fn main() -> io::Result<()> {
     execute!(stdout, cursor::Show, LeaveAlternateScreen)?;
     disable_raw_mode()?;
 
-    println!("cols: {} rows: {}", start_col, start_row);
+    println!("cols: {} rows: {}", posx, posy);
     Ok(())
-}
-
-fn draw_block(
-    screen_buffer: &mut Vec<Vec<Pixel>>,
-    start_row: usize,
-    start_col: usize,
-    mut pos_x: usize,
-    pos_y: usize,
-) {
-    // check if the max col/row a block occupies is overflowing
-    let rows = screen_buffer.len();
-    let cols = screen_buffer[0].len();
-    if pos_y + 1 + start_row >= rows || pos_x + pos_y + 3 + start_col >= cols {
-        return;
-    }
-
-    pos_x *= 3;
-    screen_buffer[pos_y + start_row][pos_x + pos_y + start_col] = Pixel {
-        ch: '/',
-        color: Color::Blue,
-    };
-    screen_buffer[pos_y + start_row][pos_x + pos_y + 1 + start_col] = Pixel {
-        ch: '\\',
-        color: Color::Blue,
-    };
-
-    screen_buffer[pos_y + start_row][pos_x + pos_y + 2 + start_col] = Pixel {
-        ch: '\\',
-        color: Color::Blue,
-    };
-    screen_buffer[pos_y + start_row][pos_x + pos_y + 3 + start_col] = Pixel {
-        ch: '\\',
-        color: Color::Blue,
-    };
-    screen_buffer[pos_y + 1 + start_row][pos_x + pos_y + start_col] = Pixel {
-        ch: '\\',
-        color: Color::Blue,
-    };
-    screen_buffer[pos_y + 1 + start_row][pos_x + pos_y + 1 + start_col] = Pixel {
-        ch: '/',
-        color: Color::DarkBlue,
-    };
-    screen_buffer[pos_y + 1 + start_row][pos_x + pos_y + 2 + start_col] = Pixel {
-        ch: '/',
-        color: Color::DarkBlue,
-    };
-    screen_buffer[pos_y + 1 + start_row][pos_x + pos_y + 3 + start_col] = Pixel {
-        ch: '/',
-        color: Color::DarkBlue,
-    };
 }
