@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use crossterm::{
     cursor, execute, queue,
-    style::{self, Color, Stylize},
+    style::{self, Color, Print, Stylize},
     terminal::{
         self, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     },
@@ -25,14 +25,17 @@ impl Window {
         };
     }
 
-    fn clear(&self, buf: &mut Vec<Vec<Pixel>>) {
+    fn clear(&self, buf: &mut Vec<Vec<Pixel>>, ch: char) {
+        let screen_w = buf[0].len();
+        let screen_h = buf.len();
+
         for y in 0..self.window_height + 1 {
             let target_y = (self.posy + y) as usize;
             for x in 0..self.window_width {
                 let target_x = (self.posx + x + y) as usize;
-                if target_x < buf[0].len() as usize && target_y < buf.len() as usize {
+                if target_x < screen_w as usize && target_y < screen_h as usize {
                     buf[target_y][target_x] = Pixel {
-                        ch: '_',
+                        ch: ch,
                         color: Color::White,
                     }
                 }
@@ -82,6 +85,19 @@ impl Window {
             color: Color::DarkBlue,
         };
     }
+
+    fn update_buf(&self, buf: &mut Vec<Vec<Pixel>>, board: Vec<Vec<usize>>) {
+        let board_cols = board[0].len();
+        let board_rows = board.len();
+
+        for row in 0..board_rows {
+            for col in (0..board_cols).rev() {
+                if board[row][col] == 1 {
+                    self.add_block(buf, col, row);
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -128,18 +144,34 @@ fn main() -> io::Result<()> {
     let next_preview_window = Window::new(next_width, next_height, posx, posy);
 
     // update screen frame buffer
-    game_window.clear(&mut screen_buffer);
-    next_preview_window.clear(&mut screen_buffer);
+    game_window.clear(&mut screen_buffer, '_');
+    next_preview_window.clear(&mut screen_buffer, '`');
 
-    game_window.add_block(&mut screen_buffer, 3, 1);
-    game_window.add_block(&mut screen_buffer, 3, 2);
-    game_window.add_block(&mut screen_buffer, 2, 2);
-    game_window.add_block(&mut screen_buffer, 2, 3);
+    // example state of a board to test if rendering works properly
+    let board: Vec<Vec<usize>> = vec![
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 1, 1, 1, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 1, 1, 0],
+        vec![1, 1, 0, 0, 0, 0, 1, 1, 1, 0],
+        vec![1, 1, 1, 0, 0, 1, 1, 0, 1, 1],
+        vec![1, 1, 0, 1, 1, 1, 1, 1, 1, 1],
+    ];
 
-    game_window.add_block(&mut screen_buffer, 3, 19);
-    game_window.add_block(&mut screen_buffer, 2, 19);
-    game_window.add_block(&mut screen_buffer, 1, 19);
-    game_window.add_block(&mut screen_buffer, 0, 19);
+    game_window.update_buf(&mut screen_buffer, board);
 
     next_preview_window.add_block(&mut screen_buffer, 3, 1);
     next_preview_window.add_block(&mut screen_buffer, 3, 2);
@@ -157,6 +189,8 @@ fn main() -> io::Result<()> {
         }
     }
 
+    display_score(&mut stdout)?;
+
     stdout.flush()?;
 
     std::thread::sleep(std::time::Duration::from_secs(10));
@@ -165,5 +199,10 @@ fn main() -> io::Result<()> {
     disable_raw_mode()?;
 
     println!("cols: {} rows: {}", posx, posy);
+    Ok(())
+}
+
+fn display_score(stdout: &mut io::Stdout) -> io::Result<()> {
+    queue!(stdout, Print("score: 1200\t"), Print("lines: 10"))?;
     Ok(())
 }
