@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use crossterm::{
     cursor, execute, queue,
-    style::{self, Color, Print, Stylize},
+    style::{self, Color, Stylize},
     terminal::{
         self, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     },
@@ -50,7 +50,7 @@ impl Window {
             return;
         }
 
-        posx *= 3;
+        posx *= 3; // translating board coordinate to rendering grid coordinate, single block in board holds 3 pixels along the x axis.
         buf[posy + self.posy][posx + posy + self.posx] = Pixel {
             ch: '/',
             color: Color::Blue,
@@ -189,11 +189,11 @@ fn main() -> io::Result<()> {
         }
     }
 
-    display_score(&mut stdout)?;
+    display_score(&mut stdout, 3, 1, 1200, 10)?;
 
     stdout.flush()?;
 
-    std::thread::sleep(std::time::Duration::from_secs(10));
+    std::thread::sleep(std::time::Duration::from_secs(4));
 
     execute!(stdout, cursor::Show, LeaveAlternateScreen)?;
     disable_raw_mode()?;
@@ -202,7 +202,18 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn display_score(stdout: &mut io::Stdout) -> io::Result<()> {
-    queue!(stdout, Print("score: 1200\t"), Print("lines: 10"))?;
+fn display_score(
+    stdout: &mut io::Stdout,
+    posx: u16,
+    posy: u16,
+    score: u32,
+    line: u32,
+) -> io::Result<()> {
+    queue!(
+        stdout,
+        cursor::MoveTo(posx, posy),
+        style::PrintStyledContent(format!("Score: {} \t", score).with(Color::Yellow)),
+        style::PrintStyledContent(format!("Lines: {}", line).with(Color::Cyan)),
+    )?;
     Ok(())
 }
