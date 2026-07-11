@@ -32,6 +32,83 @@ struct GameState {
     is_running: bool,
 }
 
+enum WinType {
+    Game,
+    Next,
+}
+
+struct Screen {
+    buffer: Vec<Vec<Pixel>>,
+    game_win: Window,
+    next_win: Window, // next piece preview box
+}
+
+impl Screen {
+    fn new(screen_w: usize, screen_h: usize) -> Self {
+        let game_pos_x = screen_w.saturating_sub(GAME_BOARD_WIN_W) / 4;
+        let game_pos_y = screen_h.saturating_sub(GAME_BOARD_WIN_H) / 2;
+
+        let next_pos_x = game_pos_x + GAME_BOARD_WIN_W + 10;
+        let next_pos_y = game_pos_y + 2;
+
+        Self {
+            buffer: vec![vec![Pixel::default(); screen_w as usize]; screen_h as usize],
+            game_win: Window::new(GAME_BOARD_WIN_W, GAME_BOARD_WIN_H, game_pos_x, game_pos_y),
+            next_win: Window::new(NEXT_BOARD_WIN_W, NEXT_BOARD_WIN_H, next_pos_x, next_pos_y),
+        }
+    }
+
+    fn clear_win(&mut self, win_type: WinType, ch: char) {
+        match win_type {
+            WinType::Game => self.game_win.clear(&mut self.buffer, ch),
+            WinType::Next => self.next_win.clear(&mut self.buffer, ch),
+        }
+    }
+
+    fn update_buf<const COLS: usize, const ROWS: usize>(
+        &mut self,
+        win_type: WinType,
+        board: &[[u8; COLS]; ROWS],
+    ) {
+        let board_cols = board[0].len();
+        let board_rows = board.len();
+
+        for row in 0..board_rows {
+            for col in (0..board_cols).rev() {
+                if board[row][col] != 1 {
+                    continue;
+                }
+
+                match win_type {
+                    WinType::Game => self.game_win.add_block(&mut self.buffer, col, row),
+                    WinType::Next => self.next_win.add_block(&mut self.buffer, col, row),
+                }
+            }
+        }
+    }
+
+    fn display_text(&mut self, text: String, color: Color, posx: usize, posy: usize) {
+        for (i, ch) in text.chars().enumerate() {
+            if posx + i < self.buffer[0].len() && posy < self.buffer.len() {
+                self.buffer[posy][posx + i] = Pixel { ch, color: color };
+            }
+        }
+    }
+
+    fn render(&self, stdout: &mut io::Stdout) -> io::Result<()> {
+        for (y, row) in self.buffer.iter().enumerate() {
+            queue!(stdout, cursor::MoveTo(0, y as u16))?;
+            for pixel in row {
+                queue!(
+                    stdout,
+                    style::PrintStyledContent(pixel.ch.with(pixel.color))
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
 struct Window {
     width: usize,
     height: usize,
@@ -74,7 +151,7 @@ impl Window {
             return;
         }
 
-        posx *= 3; // translating board coordinate to rendering grid coordinate, single block in board holds 3 pixels along the x axis.
+        posx *= 3; // projecting board coordinate to screen buffer coordinate, single block in board is 3 pixels wide in the screen buffer.
         buf[posy + self.pos_y][posx + posy + self.pos_x] = Pixel {
             ch: '/',
             color: Color::Blue,
@@ -109,29 +186,21 @@ impl Window {
             color: Color::DarkBlue,
         };
     }
-
-    fn update_buf<const COLS: usize, const ROWS: usize>(
-        &self,
-        buf: &mut Vec<Vec<Pixel>>,
-        board: &[[u8; COLS]; ROWS],
-    ) {
-        let board_cols = board[0].len();
-        let board_rows = board.len();
-
-        for row in 0..board_rows {
-            for col in (0..board_cols).rev() {
-                if board[row][col] == 1 {
-                    self.add_block(buf, col, row);
-                }
-            }
-        }
-    }
 }
 
 #[derive(Clone)]
 struct Pixel {
     ch: char,
     color: Color,
+}
+
+impl Default for Pixel {
+    fn default() -> Self {
+        Self {
+            ch: ' ',
+            color: Color::Reset,
+        }
+    }
 }
 
 fn main() -> io::Result<()> {
@@ -146,26 +215,7 @@ fn main() -> io::Result<()> {
     )?;
 
     let (screen_w, screen_h) = terminal::size()?;
-
-    let mut screen_buffer = vec![
-        vec![
-            Pixel {
-                ch: ' ',
-                color: Color::Reset
-            };
-            screen_w as usize
-        ];
-        screen_h as usize
-    ];
-
-    let posx = (screen_w as usize).saturating_sub(GAME_BOARD_WIN_W) / 4;
-    let posy = (screen_h as usize).saturating_sub(GAME_BOARD_WIN_H) / 2;
-    let game_window = Window::new(GAME_BOARD_WIN_W, GAME_BOARD_WIN_H, posx, posy);
-
-    // next piece preview box
-    let posx = (screen_w as usize).saturating_sub(NEXT_BOARD_WIN_W) * 11 / 20;
-    let posy = (screen_h as usize).saturating_sub(NEXT_BOARD_WIN_H) / 3;
-    let next_preview_window = Window::new(NEXT_BOARD_WIN_W, NEXT_BOARD_WIN_H, posx, posy);
+    let mut screen = Screen::new(screen_w as usize, screen_h as usize);
 
     // example state of a board to test if rendering works properly
     let board: [[u8; GAME_BOARD_W]; GAME_BOARD_H] = [
@@ -220,24 +270,19 @@ fn main() -> io::Result<()> {
         // update game state
 
         // update screen buffer
-        game_window.clear(&mut screen_buffer, '_');
-        next_preview_window.clear(&mut screen_buffer, '`');
+        screen.clear_win(WinType::Game, '_');
+        screen.clear_win(WinType::Next, '`');
 
-        game_window.update_buf(&mut screen_buffer, &state.game_board);
-        next_preview_window.update_buf(&mut screen_buffer, &state.next_board);
+        screen.update_buf(WinType::Game, &state.game_board);
+        screen.update_buf(WinType::Next, &state.next_board);
 
-        display_score(&mut screen_buffer, 3, 1, 1200, 10);
+        let score_text = format!("Score: {}\t", 1200);
+        let line_text = format!("Line: {}", 100);
+        screen.display_text(score_text, Yellow, 7, 2);
+        screen.display_text(line_text, Cyan, 7, 3);
 
         // render
-        for (y, row) in screen_buffer.iter().enumerate() {
-            queue!(stdout, cursor::MoveTo(0, y as u16))?;
-            for pixel in row {
-                queue!(
-                    stdout,
-                    style::PrintStyledContent(pixel.ch.with(pixel.color))
-                )?;
-            }
-        }
+        screen.render(&mut stdout)?;
 
         stdout.flush()?;
     }
@@ -246,23 +291,4 @@ fn main() -> io::Result<()> {
     disable_raw_mode()?;
 
     Ok(())
-}
-
-// TODO: update this function to be display_text(text: String, color: Color, posx, posy)
-fn display_score(buf: &mut Vec<Vec<Pixel>>, posx: usize, posy: usize, score: u16, line: u16) {
-    let score_text = format!("Score: {}\t", score);
-    let line_text = format!("Line: {}", line);
-
-    for (i, ch) in score_text.chars().enumerate() {
-        if posx + i < buf[0].len() && posy < buf.len() {
-            buf[posy][posx + i] = Pixel { ch, color: Yellow };
-        }
-    }
-
-    let offset = score_text.len();
-    for (i, ch) in line_text.chars().enumerate() {
-        if posx + i + offset < buf[0].len() && posy < buf.len() {
-            buf[posy][posx + i + offset] = Pixel { ch, color: Cyan };
-        }
-    }
 }
