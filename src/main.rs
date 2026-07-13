@@ -1,6 +1,6 @@
 use std::{
     io::{self, Write},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crossterm::{
@@ -16,6 +16,7 @@ use crossterm::{
         self, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     },
 };
+use rand::seq::SliceRandom;
 
 const GAME_BOARD_W: usize = 10;
 const GAME_BOARD_H: usize = 20;
@@ -26,10 +27,106 @@ const GAME_BOARD_WIN_H: usize = GAME_BOARD_H;
 const NEXT_BOARD_WIN_W: usize = NEXT_BOARD_W * 3;
 const NEXT_BOARD_WIN_H: usize = NEXT_BOARD_H;
 
+enum TetrominoType {
+    Square,
+    Line,
+    Squiggly,
+    ReverseSquiggly,
+    TBlock,
+    LBlock,
+    ReverseLBlock,
+}
+
+#[derive(Default)]
 struct GameState {
-    game_board: [[u8; GAME_BOARD_W]; GAME_BOARD_H],
-    next_board: [[u8; NEXT_BOARD_W]; NEXT_BOARD_H],
+    active_piece: Tetromino,
+    piece_x: i32,
+    piece_y: i32,
+
+    bag: Vec<TetrominoType>,
+
+    game_win_buf: [[u8; GAME_BOARD_W]; GAME_BOARD_H],
+    next_win_buf: [[u8; NEXT_BOARD_W]; NEXT_BOARD_H],
     is_running: bool,
+}
+
+impl GameState {
+    fn new() -> Self {
+        Self {
+            is_running: true,
+            piece_x: (GAME_BOARD_W / 2) as i32,
+            piece_y: 1,
+            ..Default::default()
+        }
+    }
+
+    fn new_piece(&mut self) -> Tetromino {
+        if self.bag.is_empty() {
+            self.bag = vec![
+                TetrominoType::Square,
+                TetrominoType::Line,
+                TetrominoType::Squiggly,
+                TetrominoType::ReverseSquiggly,
+                TetrominoType::TBlock,
+                TetrominoType::LBlock,
+                TetrominoType::ReverseLBlock,
+            ];
+
+            let mut rng = rand::rng();
+            self.bag.shuffle(&mut rng);
+        }
+
+        let next_type = self.bag.pop().unwrap();
+
+        Tetromino::new(next_type)
+    }
+
+    fn update_game_win_buf(&mut self) {
+        self.game_win_buf = [[0; GAME_BOARD_W]; GAME_BOARD_H];
+        for offset in self.active_piece.blocks.iter() {
+            let screen_x = self.piece_x + offset.0;
+            let screen_y = self.piece_y + offset.1;
+
+            if (screen_x as usize) < self.game_win_buf[0].len()
+                && (screen_y as usize) < self.game_win_buf.len()
+            {
+                self.game_win_buf[screen_y as usize][screen_x as usize] = 1;
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct Tetromino {
+    blocks: [(i32, i32); 4],
+}
+
+impl Tetromino {
+    fn new(t_type: TetrominoType) -> Self {
+        match t_type {
+            TetrominoType::Square => Self {
+                blocks: [(0, 0), (1, 0), (0, 1), (1, 1)],
+            },
+            TetrominoType::Line => Self {
+                blocks: [(-1, 0), (0, 0), (1, 0), (2, 0)],
+            },
+            TetrominoType::Squiggly => Self {
+                blocks: [(-1, 0), (0, 0), (0, 1), (1, 1)],
+            },
+            TetrominoType::ReverseSquiggly => Self {
+                blocks: [(1, 0), (0, 0), (0, -1), (1, -1)],
+            },
+            TetrominoType::TBlock => Self {
+                blocks: [(0, -1), (-1, 0), (0, 0), (1, 0)],
+            },
+            TetrominoType::LBlock => Self {
+                blocks: [(1, -1), (-1, 0), (0, 0), (1, 0)],
+            },
+            TetrominoType::ReverseLBlock => Self {
+                blocks: [(-1, -1), (-1, 0), (0, 0), (1, 0)],
+            },
+        }
+    }
 }
 
 enum WinType {
@@ -140,6 +237,14 @@ impl Window {
                         color: Color::White,
                     }
                 }
+
+                // clearing board boundary
+                if x == 0 {
+                    buf[target_y][target_x - 1] = Pixel::default();
+                }
+                if x == self.width - 1 {
+                    buf[target_y][target_x + 1] = Pixel::default();
+                }
             }
         }
     }
@@ -216,51 +321,19 @@ fn main() -> io::Result<()> {
 
     let (screen_w, screen_h) = terminal::size()?;
     let mut screen = Screen::new(screen_w as usize, screen_h as usize);
+    let mut state = GameState::new();
+    state.active_piece = state.new_piece();
 
-    // example state of a board to test if rendering works properly
-    let board: [[u8; GAME_BOARD_W]; GAME_BOARD_H] = [
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 1, 1, 1, 0, 0, 0, 0],
-        [0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 1, 1, 0],
-        [1, 1, 0, 0, 0, 0, 1, 1, 1, 0],
-        [1, 1, 1, 0, 0, 1, 1, 0, 1, 1],
-        [1, 1, 0, 1, 1, 1, 1, 1, 1, 1],
-    ];
-
-    let next: [[u8; NEXT_BOARD_W]; NEXT_BOARD_H] = [
-        [0, 0, 0, 0, 0, 0],
-        [0, 0, 1, 0, 0, 0],
-        [0, 0, 1, 1, 0, 0],
-        [0, 0, 0, 1, 0, 0],
-        [0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0],
-    ];
-
-    let mut state = GameState {
-        game_board: board,
-        next_board: next,
-        is_running: true,
-    };
+    let mut last_fall_time = Instant::now();
+    let fall_speed = Duration::from_secs(1);
 
     while state.is_running {
         // input
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
+                    KeyCode::Left => state.piece_x -= 1,
+                    KeyCode::Right => state.piece_x += 1,
                     KeyCode::Char('q') => state.is_running = false,
                     _ => {}
                 }
@@ -268,13 +341,18 @@ fn main() -> io::Result<()> {
         }
 
         // update game state
+        if last_fall_time.elapsed() >= fall_speed {
+            state.piece_y += 1;
+            last_fall_time = Instant::now();
+        }
+        state.update_game_win_buf();
 
         // update screen buffer
         screen.clear_win(WinType::Game, '_');
         screen.clear_win(WinType::Next, '`');
 
-        screen.update_buf(WinType::Game, &state.game_board);
-        screen.update_buf(WinType::Next, &state.next_board);
+        screen.update_buf(WinType::Game, &state.game_win_buf);
+        screen.update_buf(WinType::Next, &state.next_win_buf);
 
         let score_text = format!("Score: {}\t", 1200);
         let line_text = format!("Line: {}", 100);
