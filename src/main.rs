@@ -57,8 +57,6 @@ impl GameState {
     fn new() -> Self {
         Self {
             is_running: true,
-            piece_x: (GAME_BOARD_W / 2) as i32,
-            piece_y: 0,
             ..Default::default()
         }
     }
@@ -89,11 +87,11 @@ impl GameState {
             let nx = x + offset.0;
             let ny = y + offset.1;
 
-            if nx < 0 || nx as usize >= GAME_BOARD_W {
+            if nx < 0 || nx >= GAME_BOARD_W as i32 {
                 return false;
             }
 
-            if ny as usize >= GAME_BOARD_H {
+            if ny >= GAME_BOARD_H as i32 {
                 return false;
             }
 
@@ -104,9 +102,10 @@ impl GameState {
         true
     }
 
-    fn move_piece_x(&mut self, offset_x: i32) {
-        if self.is_valid_pos(self.piece_x + offset_x, self.piece_y, &self.active_piece) {
-            self.piece_x += offset_x
+    fn move_piece(&mut self, x: i32, y: i32) {
+        if self.is_valid_pos(self.piece_x + x, self.piece_y + y, &self.active_piece) {
+            self.piece_x += x;
+            self.piece_y += y;
         }
     }
 
@@ -135,12 +134,20 @@ impl GameState {
         }
     }
 
+    fn drop_piece(&mut self) {
+        while self.is_valid_pos(self.piece_x, self.piece_y + 1, &self.active_piece) {
+            self.piece_y += 1;
+        }
+    }
+
     fn lock_piece(&mut self) {
         for offset in self.active_piece.blocks.iter() {
             let final_x = offset.0 + self.piece_x;
             let final_y = offset.1 + self.piece_y;
 
-            self.game_board[final_y as usize][final_x as usize] = true;
+            if final_x >= 0 && final_y >= 0 {
+                self.game_board[final_y as usize][final_x as usize] = true;
+            }
         }
     }
 
@@ -150,9 +157,55 @@ impl GameState {
         self.piece_x = (GAME_BOARD_W / 2) as i32 - 1;
         self.piece_y = 0;
 
-        // if !self.is_valid_pos(self.piece_x, self.piece_y, &self.active_piece) {
-        //     self.is_running = false;
-        // }
+        if !self.is_valid_pos(self.piece_x, self.piece_y, &self.active_piece) {
+            self.is_running = false;
+        }
+    }
+
+    fn clear_line(&mut self) {
+        let mut y = GAME_BOARD_H - 1;
+        while y > 0 {
+            let mut is_full = true;
+
+            for x in 0..GAME_BOARD_W {
+                if !self.game_board[y][x] {
+                    is_full = false;
+                    break;
+                }
+            }
+
+            if is_full {
+                for shift_y in (1..=y).rev() {
+                    self.game_board[shift_y] = self.game_board[shift_y - 1];
+                }
+
+                self.game_board[0] = [false; GAME_BOARD_W];
+            } else {
+                y -= 1;
+            }
+        }
+    }
+
+    fn handle_input(&mut self) -> io::Result<()> {
+        if let Event::Key(key) = event::read()? {
+            match key.kind {
+                event::KeyEventKind::Press => match key.code {
+                    KeyCode::Left => self.move_piece(-1, 0),
+                    KeyCode::Right => self.move_piece(1, 0),
+                    KeyCode::Up => self.rotate_piece(),
+                    KeyCode::Down => self.move_piece(0, 1),
+                    KeyCode::Char(' ') => self.drop_piece(),
+                    KeyCode::Char('q') => self.is_running = false,
+                    _ => {}
+                },
+                event::KeyEventKind::Repeat => match key.code {
+                    KeyCode::Down => self.move_piece(0, 1),
+                    _ => {}
+                },
+                event::KeyEventKind::Release => todo!(),
+            }
+        }
+        Ok(())
     }
 
     fn update_game_win_buf(&mut self) {
@@ -345,10 +398,10 @@ impl Window {
                 }
 
                 // clearing board boundary
-                if x == 0 {
+                if x == 0 && target_x > 0 {
                     buf[target_y][target_x - 1] = Pixel::default();
                 }
-                if x == self.width - 1 {
+                if x == self.width - 1 && target_x + 1 < screen_w {
                     buf[target_y][target_x + 1] = Pixel::default();
                 }
             }
@@ -428,7 +481,7 @@ fn main() -> io::Result<()> {
     let (screen_w, screen_h) = terminal::size()?;
     let mut screen = Screen::new(screen_w as usize, screen_h as usize);
     let mut state = GameState::new();
-    state.active_piece = state.new_piece();
+    state.spawn_new_piece();
 
     let mut last_fall_time = Instant::now();
     let fall_speed = Duration::from_millis(500);
@@ -436,15 +489,7 @@ fn main() -> io::Result<()> {
     while state.is_running {
         // input
         if event::poll(Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Left => state.move_piece_x(-1),
-                    KeyCode::Right => state.move_piece_x(1),
-                    KeyCode::Up => state.rotate_piece(),
-                    KeyCode::Char('q') => state.is_running = false,
-                    _ => {}
-                }
-            }
+            state.handle_input()?
         }
 
         // update game state
@@ -453,6 +498,7 @@ fn main() -> io::Result<()> {
                 state.piece_y += 1;
             } else {
                 state.lock_piece();
+                state.clear_line();
                 state.spawn_new_piece();
             }
 
