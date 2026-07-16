@@ -27,7 +27,7 @@ const GAME_BOARD_WIN_H: usize = GAME_BOARD_H;
 const NEXT_BOARD_WIN_W: usize = NEXT_BOARD_W * 3;
 const NEXT_BOARD_WIN_H: usize = NEXT_BOARD_H;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 enum TetrominoType {
     #[default]
     Square,
@@ -58,7 +58,7 @@ impl GameState {
         Self {
             is_running: true,
             piece_x: (GAME_BOARD_W / 2) as i32,
-            piece_y: 1,
+            piece_y: 0,
             ..Default::default()
         }
     }
@@ -96,6 +96,10 @@ impl GameState {
             if ny as usize >= GAME_BOARD_H {
                 return false;
             }
+
+            if ny >= 0 && self.game_board[ny as usize][nx as usize] {
+                return false;
+            }
         }
         true
     }
@@ -106,8 +110,62 @@ impl GameState {
         }
     }
 
+    fn rotate_piece(&mut self) {
+        let rotated = self.active_piece.get_rotated_copy();
+
+        let kicks = [
+            (0, 0),  // no kicks
+            (-1, 0), // kick 1 step to left
+            (1, 0),  // kick 1 step to right
+            (0, -1), // kick up
+            (-2, 0), // kick 2 steps to left
+            (2, 0),  // kick 2 steps to right
+        ];
+
+        for (dx, dy) in kicks.iter() {
+            let nx = self.piece_x + dx;
+            let ny = self.piece_y + dy;
+
+            if self.is_valid_pos(nx, ny, &rotated) {
+                self.active_piece = rotated;
+                self.piece_x = nx;
+                self.piece_y = ny;
+                return;
+            }
+        }
+    }
+
+    fn lock_piece(&mut self) {
+        for offset in self.active_piece.blocks.iter() {
+            let final_x = offset.0 + self.piece_x;
+            let final_y = offset.1 + self.piece_y;
+
+            self.game_board[final_y as usize][final_x as usize] = true;
+        }
+    }
+
+    fn spawn_new_piece(&mut self) {
+        self.active_piece = self.new_piece();
+
+        self.piece_x = (GAME_BOARD_W / 2) as i32 - 1;
+        self.piece_y = 0;
+
+        // if !self.is_valid_pos(self.piece_x, self.piece_y, &self.active_piece) {
+        //     self.is_running = false;
+        // }
+    }
+
     fn update_game_win_buf(&mut self) {
         self.game_win_buf = [[0; GAME_BOARD_W]; GAME_BOARD_H];
+
+        for x in 0..self.game_board[0].len() {
+            for y in 0..self.game_board.len() {
+                if self.game_board[y][x] {
+                    self.game_win_buf[y][x] = 1;
+                }
+            }
+        }
+
         for offset in self.active_piece.blocks.iter() {
             let screen_x = self.piece_x + offset.0;
             let screen_y = self.piece_y + offset.1;
@@ -121,7 +179,7 @@ impl GameState {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Tetromino {
     blocks: [(i32, i32); 4],
     t_type: TetrominoType,
@@ -161,16 +219,19 @@ impl Tetromino {
         }
     }
 
-    fn rotate(&mut self) {
-        if matches!(self.t_type, TetrominoType::Square) {
-            return;
+    fn get_rotated_copy(&mut self) -> Self {
+        let mut rotated = self.clone();
+        if matches!(rotated.t_type, TetrominoType::Square) {
+            return rotated;
         }
 
-        for block in self.blocks.iter_mut() {
+        for block in rotated.blocks.iter_mut() {
             let temp = block.0;
             block.0 = -block.1;
             block.1 = temp;
         }
+
+        rotated
     }
 }
 
@@ -370,7 +431,7 @@ fn main() -> io::Result<()> {
     state.active_piece = state.new_piece();
 
     let mut last_fall_time = Instant::now();
-    let fall_speed = Duration::from_secs(1);
+    let fall_speed = Duration::from_millis(500);
 
     while state.is_running {
         // input
@@ -379,7 +440,7 @@ fn main() -> io::Result<()> {
                 match key.code {
                     KeyCode::Left => state.move_piece_x(-1),
                     KeyCode::Right => state.move_piece_x(1),
-                    KeyCode::Up => state.active_piece.rotate(),
+                    KeyCode::Up => state.rotate_piece(),
                     KeyCode::Char('q') => state.is_running = false,
                     _ => {}
                 }
@@ -390,7 +451,11 @@ fn main() -> io::Result<()> {
         if last_fall_time.elapsed() >= fall_speed {
             if state.is_valid_pos(state.piece_x, state.piece_y + 1, &state.active_piece) {
                 state.piece_y += 1;
+            } else {
+                state.lock_piece();
+                state.spawn_new_piece();
             }
+
             last_fall_time = Instant::now();
         }
         state.update_game_win_buf();
