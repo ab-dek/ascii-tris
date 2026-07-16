@@ -27,7 +27,9 @@ const GAME_BOARD_WIN_H: usize = GAME_BOARD_H;
 const NEXT_BOARD_WIN_W: usize = NEXT_BOARD_W * 3;
 const NEXT_BOARD_WIN_H: usize = NEXT_BOARD_H;
 
+#[derive(Default)]
 enum TetrominoType {
+    #[default]
     Square,
     Line,
     Squiggly,
@@ -42,6 +44,7 @@ struct GameState {
     active_piece: Tetromino,
     piece_x: i32,
     piece_y: i32,
+    game_board: [[bool; GAME_BOARD_W]; GAME_BOARD_H],
 
     bag: Vec<TetrominoType>,
 
@@ -81,6 +84,28 @@ impl GameState {
         Tetromino::new(next_type)
     }
 
+    fn is_valid_pos(&self, x: i32, y: i32, piece: &Tetromino) -> bool {
+        for offset in piece.blocks.iter() {
+            let nx = x + offset.0;
+            let ny = y + offset.1;
+
+            if nx < 0 || nx as usize >= GAME_BOARD_W {
+                return false;
+            }
+
+            if ny as usize >= GAME_BOARD_H {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn move_piece_x(&mut self, offset_x: i32) {
+        if self.is_valid_pos(self.piece_x + offset_x, self.piece_y, &self.active_piece) {
+            self.piece_x += offset_x
+        }
+    }
+
     fn update_game_win_buf(&mut self) {
         self.game_win_buf = [[0; GAME_BOARD_W]; GAME_BOARD_H];
         for offset in self.active_piece.blocks.iter() {
@@ -99,6 +124,7 @@ impl GameState {
 #[derive(Default)]
 struct Tetromino {
     blocks: [(i32, i32); 4],
+    t_type: TetrominoType,
 }
 
 impl Tetromino {
@@ -106,25 +132,44 @@ impl Tetromino {
         match t_type {
             TetrominoType::Square => Self {
                 blocks: [(0, 0), (1, 0), (0, 1), (1, 1)],
+                t_type: t_type,
             },
             TetrominoType::Line => Self {
                 blocks: [(-1, 0), (0, 0), (1, 0), (2, 0)],
+                t_type: t_type,
             },
             TetrominoType::Squiggly => Self {
                 blocks: [(-1, 0), (0, 0), (0, 1), (1, 1)],
+                t_type: t_type,
             },
             TetrominoType::ReverseSquiggly => Self {
                 blocks: [(1, 0), (0, 0), (0, -1), (1, -1)],
+                t_type: t_type,
             },
             TetrominoType::TBlock => Self {
                 blocks: [(0, -1), (-1, 0), (0, 0), (1, 0)],
+                t_type: t_type,
             },
             TetrominoType::LBlock => Self {
                 blocks: [(1, -1), (-1, 0), (0, 0), (1, 0)],
+                t_type: t_type,
             },
             TetrominoType::ReverseLBlock => Self {
                 blocks: [(-1, -1), (-1, 0), (0, 0), (1, 0)],
+                t_type: t_type,
             },
+        }
+    }
+
+    fn rotate(&mut self) {
+        if matches!(self.t_type, TetrominoType::Square) {
+            return;
+        }
+
+        for block in self.blocks.iter_mut() {
+            let temp = block.0;
+            block.0 = -block.1;
+            block.1 = temp;
         }
     }
 }
@@ -332,8 +377,9 @@ fn main() -> io::Result<()> {
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
-                    KeyCode::Left => state.piece_x -= 1,
-                    KeyCode::Right => state.piece_x += 1,
+                    KeyCode::Left => state.move_piece_x(-1),
+                    KeyCode::Right => state.move_piece_x(1),
+                    KeyCode::Up => state.active_piece.rotate(),
                     KeyCode::Char('q') => state.is_running = false,
                     _ => {}
                 }
@@ -342,7 +388,9 @@ fn main() -> io::Result<()> {
 
         // update game state
         if last_fall_time.elapsed() >= fall_speed {
-            state.piece_y += 1;
+            if state.is_valid_pos(state.piece_x, state.piece_y + 1, &state.active_piece) {
+                state.piece_y += 1;
+            }
             last_fall_time = Instant::now();
         }
         state.update_game_win_buf();
