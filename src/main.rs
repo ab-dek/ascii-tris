@@ -9,7 +9,7 @@ use crossterm::{
     execute, queue,
     style::{
         self,
-        Color::{self, Cyan, Yellow},
+        Color::{self, Cyan, Red, Yellow},
         Stylize,
     },
     terminal::{
@@ -49,8 +49,10 @@ struct GameState {
 
     bag: Vec<TetrominoType>,
 
-    score: u16,
-    lines: u16,
+    speed: u64,
+    score: u32,
+    lines: u32,
+    level: u32,
 
     game_win_buf: [[u8; GAME_BOARD_W]; GAME_BOARD_H],
     next_win_buf: [[u8; NEXT_BOARD_W]; NEXT_BOARD_H],
@@ -60,6 +62,8 @@ struct GameState {
 impl GameState {
     fn new() -> Self {
         Self {
+            speed: 800,
+            level: 1,
             is_running: true,
             ..Default::default()
         }
@@ -202,14 +206,31 @@ impl GameState {
         }
 
         if cleared > 0 {
-            self.lines += cleared;
             self.score += match cleared {
-                1 => 100,
-                2 => 300,
-                3 => 500,
-                4 => 800,
+                1 => 100 * self.level,
+                2 => 300 * self.level,
+                3 => 500 * self.level,
+                4 => 800 * self.level,
                 _ => 0,
-            }
+            };
+            self.lines += cleared;
+
+            self.level = self.lines / 10 + 1;
+
+            self.speed = match self.level {
+                1 => 800,
+                2 => 720,
+                3 => 630,
+                4 => 550,
+                5 => 470,
+                6 => 380,
+                7 => 300,
+                8 => 220,
+                9 => 130,
+                10 => 100,
+                11 => 80,
+                _ => 0,
+            };
         }
     }
 
@@ -522,7 +543,7 @@ fn main() -> io::Result<()> {
     state.spawn_new_piece();
 
     let mut last_fall_time = Instant::now();
-    let fall_speed = Duration::from_millis(500);
+    let mut fall_speed = Duration::from_millis(state.speed);
 
     while state.is_running {
         // input
@@ -537,6 +558,7 @@ fn main() -> io::Result<()> {
             } else {
                 state.lock_piece();
                 state.clear_line();
+                fall_speed = Duration::from_millis(state.speed);
                 state.spawn_new_piece();
             }
 
@@ -554,8 +576,10 @@ fn main() -> io::Result<()> {
 
         let score_text = format!("Score: {}\t", state.score);
         let line_text = format!("Lines: {}", state.lines);
+        let level_text = format!("Level: {}", state.level);
         screen.display_text(score_text, Yellow, 7, 2);
         screen.display_text(line_text, Cyan, 7, 3);
+        screen.display_text(level_text, Red, 7, 4);
 
         // render
         screen.render(&mut stdout)?;
