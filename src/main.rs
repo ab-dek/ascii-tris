@@ -44,9 +44,13 @@ struct GameState {
     active_piece: Tetromino,
     piece_x: i32,
     piece_y: i32,
+    next_piece: Tetromino,
     game_board: [[bool; GAME_BOARD_W]; GAME_BOARD_H],
 
     bag: Vec<TetrominoType>,
+
+    score: u16,
+    lines: u16,
 
     game_win_buf: [[u8; GAME_BOARD_W]; GAME_BOARD_H],
     next_win_buf: [[u8; NEXT_BOARD_W]; NEXT_BOARD_H],
@@ -91,7 +95,7 @@ impl GameState {
                 return false;
             }
 
-            if ny >= GAME_BOARD_H as i32 {
+            if ny < 0 || ny >= GAME_BOARD_H as i32 {
                 return false;
             }
 
@@ -152,18 +156,29 @@ impl GameState {
     }
 
     fn spawn_new_piece(&mut self) {
-        self.active_piece = self.new_piece();
+        self.active_piece = self.next_piece.clone();
+        self.next_piece = self.new_piece();
 
         self.piece_x = (GAME_BOARD_W / 2) as i32 - 1;
         self.piece_y = 0;
 
-        if !self.is_valid_pos(self.piece_x, self.piece_y, &self.active_piece) {
-            self.is_running = false;
+        // pushing down the piece so that its entirely visible
+        for dy in 0..=2 {
+            let ny = self.piece_y + dy;
+
+            if self.is_valid_pos(self.piece_x, ny, &self.active_piece) {
+                self.piece_y = ny;
+                return;
+            }
         }
+
+        self.is_running = false; // game over
     }
 
     fn clear_line(&mut self) {
+        let mut cleared = 0;
         let mut y = GAME_BOARD_H - 1;
+
         while y > 0 {
             let mut is_full = true;
 
@@ -180,29 +195,34 @@ impl GameState {
                 }
 
                 self.game_board[0] = [false; GAME_BOARD_W];
+                cleared += 1;
             } else {
                 y -= 1;
+            }
+        }
+
+        if cleared > 0 {
+            self.lines += cleared;
+            self.score += match cleared {
+                1 => 100,
+                2 => 300,
+                3 => 500,
+                4 => 800,
+                _ => 0,
             }
         }
     }
 
     fn handle_input(&mut self) -> io::Result<()> {
         if let Event::Key(key) = event::read()? {
-            match key.kind {
-                event::KeyEventKind::Press => match key.code {
-                    KeyCode::Left => self.move_piece(-1, 0),
-                    KeyCode::Right => self.move_piece(1, 0),
-                    KeyCode::Up => self.rotate_piece(),
-                    KeyCode::Down => self.move_piece(0, 1),
-                    KeyCode::Char(' ') => self.drop_piece(),
-                    KeyCode::Char('q') => self.is_running = false,
-                    _ => {}
-                },
-                event::KeyEventKind::Repeat => match key.code {
-                    KeyCode::Down => self.move_piece(0, 1),
-                    _ => {}
-                },
-                event::KeyEventKind::Release => todo!(),
+            match key.code {
+                KeyCode::Left => self.move_piece(-1, 0),
+                KeyCode::Right => self.move_piece(1, 0),
+                KeyCode::Up => self.rotate_piece(),
+                KeyCode::Down => self.move_piece(0, 1),
+                KeyCode::Char(' ') => self.drop_piece(),
+                KeyCode::Char('q') => self.is_running = false,
+                _ => {}
             }
         }
         Ok(())
@@ -227,6 +247,23 @@ impl GameState {
                 && (screen_y as usize) < self.game_win_buf.len()
             {
                 self.game_win_buf[screen_y as usize][screen_x as usize] = 1;
+            }
+        }
+    }
+
+    fn update_next_win_buf(&mut self) {
+        self.next_win_buf = [[0; NEXT_BOARD_W]; NEXT_BOARD_H];
+        let pos_x = NEXT_BOARD_W / 3;
+        let pos_y = NEXT_BOARD_H / 3;
+
+        for offset in self.next_piece.blocks.iter() {
+            let screen_x = pos_x as i32 + offset.0;
+            let screen_y = pos_y as i32 + offset.1;
+
+            if (screen_x as usize) < self.next_win_buf[0].len()
+                && (screen_y as usize) < self.next_win_buf.len()
+            {
+                self.next_win_buf[screen_y as usize][screen_x as usize] = 1;
             }
         }
     }
@@ -481,6 +518,7 @@ fn main() -> io::Result<()> {
     let (screen_w, screen_h) = terminal::size()?;
     let mut screen = Screen::new(screen_w as usize, screen_h as usize);
     let mut state = GameState::new();
+    state.next_piece = state.new_piece();
     state.spawn_new_piece();
 
     let mut last_fall_time = Instant::now();
@@ -505,6 +543,7 @@ fn main() -> io::Result<()> {
             last_fall_time = Instant::now();
         }
         state.update_game_win_buf();
+        state.update_next_win_buf();
 
         // update screen buffer
         screen.clear_win(WinType::Game, '_');
@@ -513,8 +552,8 @@ fn main() -> io::Result<()> {
         screen.update_buf(WinType::Game, &state.game_win_buf);
         screen.update_buf(WinType::Next, &state.next_win_buf);
 
-        let score_text = format!("Score: {}\t", 1200);
-        let line_text = format!("Line: {}", 100);
+        let score_text = format!("Score: {}\t", state.score);
+        let line_text = format!("Lines: {}", state.lines);
         screen.display_text(score_text, Yellow, 7, 2);
         screen.display_text(line_text, Cyan, 7, 3);
 
@@ -526,6 +565,10 @@ fn main() -> io::Result<()> {
 
     execute!(stdout, cursor::Show, LeaveAlternateScreen)?;
     disable_raw_mode()?;
+
+    println!("-- GAME OVER --");
+    println!("Score: {}", state.score);
+    println!("Lines Cleared: {}", state.lines);
 
     Ok(())
 }
