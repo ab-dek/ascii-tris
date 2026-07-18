@@ -9,7 +9,7 @@ use crossterm::{
     execute, queue,
     style::{
         self,
-        Color::{self, Cyan, Red, Yellow},
+        Color::{self, Cyan, DarkGrey, Red, Yellow},
         Stylize,
     },
     terminal::{
@@ -27,7 +27,7 @@ const GAME_BOARD_WIN_H: usize = GAME_BOARD_H;
 const NEXT_BOARD_WIN_W: usize = NEXT_BOARD_W * 3;
 const NEXT_BOARD_WIN_H: usize = NEXT_BOARD_H;
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 enum TetrominoType {
     #[default]
     Square,
@@ -39,7 +39,7 @@ enum TetrominoType {
     ReverseLBlock,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct GameState {
     active_piece: Tetromino,
     piece_x: i32,
@@ -290,7 +290,7 @@ impl GameState {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 struct Tetromino {
     blocks: [(i32, i32); 4],
     t_type: TetrominoType,
@@ -312,7 +312,7 @@ impl Tetromino {
                 t_type: t_type,
             },
             TetrominoType::ReverseSquiggly => Self {
-                blocks: [(1, 0), (0, 0), (0, -1), (1, -1)],
+                blocks: [(-1, 1), (0, 1), (0, 0), (1, 0)],
                 t_type: t_type,
             },
             TetrominoType::TBlock => Self {
@@ -359,7 +359,7 @@ struct Screen {
 
 impl Screen {
     fn new(screen_w: usize, screen_h: usize) -> Self {
-        let game_pos_x = screen_w.saturating_sub(GAME_BOARD_WIN_W) / 4;
+        let game_pos_x = screen_w.saturating_sub(GAME_BOARD_WIN_W) / 3;
         let game_pos_y = screen_h.saturating_sub(GAME_BOARD_WIN_H) / 2;
 
         let next_pos_x = game_pos_x + GAME_BOARD_WIN_W + 10;
@@ -575,11 +575,27 @@ fn main() -> io::Result<()> {
         screen.update_buf(WinType::Next, &state.next_win_buf);
 
         let score_text = format!("Score: {}\t", state.score);
-        let line_text = format!("Lines: {}", state.lines);
+        let line_text = format!("Lines: {}\t", state.lines);
         let level_text = format!("Level: {}", state.level);
-        screen.display_text(score_text, Yellow, 7, 2);
-        screen.display_text(line_text, Cyan, 7, 3);
-        screen.display_text(level_text, Red, 7, 4);
+        let help_text = format!("quit - q | left/right - 󰍞/󰍟 | down -  | drop - space");
+
+        let score_len = score_text.len();
+        let line_len = line_text.len();
+
+        screen.display_text(score_text, Yellow, screen_w as usize / 3, 1);
+        screen.display_text(line_text, Cyan, screen_w as usize / 3 + score_len, 1);
+        screen.display_text(
+            level_text,
+            Red,
+            screen_w as usize / 3 + score_len + line_len,
+            1,
+        );
+        screen.display_text(
+            help_text,
+            DarkGrey,
+            screen_w as usize / 3,
+            screen_h as usize - 2,
+        );
 
         // render
         screen.render(&mut stdout)?;
