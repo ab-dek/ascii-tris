@@ -47,6 +47,8 @@ struct GameState {
     next_piece: Tetromino,
     game_board: [[bool; GAME_BOARD_W]; GAME_BOARD_H],
 
+    lock_timer: Option<Instant>,
+
     bag: Vec<TetrominoType>,
 
     speed: u64,
@@ -177,6 +179,10 @@ impl GameState {
         }
 
         self.is_running = false; // game over
+    }
+
+    fn piece_landed(&mut self) -> bool {
+        !self.is_valid_pos(self.piece_x, self.piece_y + 1, &self.active_piece)
     }
 
     fn clear_line(&mut self) {
@@ -544,30 +550,46 @@ fn main() -> io::Result<()> {
 
     let mut last_fall_time = Instant::now();
     let mut fall_speed = Duration::from_millis(state.speed);
+    let lock_delay = Duration::from_millis(500);
 
     while state.is_running {
-        // input
+        // -- INPUT --
         if event::poll(Duration::from_millis(50))? {
             state.handle_input()?
         }
 
-        // update game state
-        if last_fall_time.elapsed() >= fall_speed {
-            if state.is_valid_pos(state.piece_x, state.piece_y + 1, &state.active_piece) {
-                state.piece_y += 1;
-            } else {
-                state.lock_piece();
-                state.clear_line();
-                fall_speed = Duration::from_millis(state.speed);
-                state.spawn_new_piece();
-            }
+        // -- UPDATE GAME STATE --
+        // check lock delay
+        if state.piece_landed() {
+            match state.lock_timer {
+                Some(timer) => {
+                    if timer.elapsed() >= lock_delay {
+                        state.lock_piece();
+                        state.clear_line();
+                        state.spawn_new_piece();
 
+                        fall_speed = Duration::from_millis(state.speed);
+                        state.lock_timer = None;
+                    }
+                }
+                None => state.lock_timer = Some(Instant::now()),
+            }
+        } else {
+            // piece start falling again(goes off a ledge)
+            state.lock_timer = None;
+        }
+
+        // update gravity
+        if !state.piece_landed() && last_fall_time.elapsed() >= fall_speed {
+            state.piece_y += 1;
             last_fall_time = Instant::now();
         }
+
+        // update windows
         state.update_game_win_buf();
         state.update_next_win_buf();
 
-        // update screen buffer
+        // -- UPDATE SCREEN BUFFER --
         screen.clear_win(WinType::Game, '_');
         screen.clear_win(WinType::Next, '`');
 
@@ -597,7 +619,7 @@ fn main() -> io::Result<()> {
             screen_h as usize - 2,
         );
 
-        // render
+        // -- RENDER --
         screen.render(&mut stdout)?;
 
         stdout.flush()?;
