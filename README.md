@@ -1,1 +1,1 @@
-![Demo](demo/demo.webp)
+<img src="demo/demo.webp" width="500" alt="Demo">
