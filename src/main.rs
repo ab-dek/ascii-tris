@@ -73,7 +73,7 @@ impl GameState {
 
     fn new_piece(&mut self) -> Tetromino {
         if self.bag.is_empty() {
-            self.bag = vec![
+            self.bag.extend([
                 TetrominoType::Square,
                 TetrominoType::Line,
                 TetrominoType::Squiggly,
@@ -81,7 +81,7 @@ impl GameState {
                 TetrominoType::TBlock,
                 TetrominoType::LBlock,
                 TetrominoType::ReverseLBlock,
-            ];
+            ]);
 
             let mut rng = rand::rng();
             self.bag.shuffle(&mut rng);
@@ -307,31 +307,31 @@ impl Tetromino {
         match t_type {
             TetrominoType::Square => Self {
                 blocks: [(0, 0), (1, 0), (0, 1), (1, 1)],
-                t_type: t_type,
+                t_type,
             },
             TetrominoType::Line => Self {
                 blocks: [(-1, 0), (0, 0), (1, 0), (2, 0)],
-                t_type: t_type,
+                t_type,
             },
             TetrominoType::Squiggly => Self {
                 blocks: [(-1, 0), (0, 0), (0, 1), (1, 1)],
-                t_type: t_type,
+                t_type,
             },
             TetrominoType::ReverseSquiggly => Self {
                 blocks: [(-1, 1), (0, 1), (0, 0), (1, 0)],
-                t_type: t_type,
+                t_type,
             },
             TetrominoType::TBlock => Self {
                 blocks: [(0, -1), (-1, 0), (0, 0), (1, 0)],
-                t_type: t_type,
+                t_type,
             },
             TetrominoType::LBlock => Self {
                 blocks: [(1, -1), (-1, 0), (0, 0), (1, 0)],
-                t_type: t_type,
+                t_type,
             },
             TetrominoType::ReverseLBlock => Self {
                 blocks: [(-1, -1), (-1, 0), (0, 0), (1, 0)],
-                t_type: t_type,
+                t_type,
             },
         }
     }
@@ -372,7 +372,7 @@ impl Screen {
         let next_pos_y = game_pos_y + 2;
 
         Self {
-            buffer: vec![vec![Pixel::default(); screen_w as usize]; screen_h as usize],
+            buffer: vec![vec![Pixel::default(); screen_w]; screen_h],
             game_win: Window::new(GAME_BOARD_WIN_W, GAME_BOARD_WIN_H, game_pos_x, game_pos_y),
             next_win: Window::new(NEXT_BOARD_WIN_W, NEXT_BOARD_WIN_H, next_pos_x, next_pos_y),
         }
@@ -410,7 +410,7 @@ impl Screen {
     fn display_text(&mut self, text: String, color: Color, posx: usize, posy: usize) {
         for (i, ch) in text.chars().enumerate() {
             if posx + i < self.buffer[0].len() && posy < self.buffer.len() {
-                self.buffer[posy][posx + i] = Pixel { ch, color: color };
+                self.buffer[posy][posx + i] = Pixel { ch, color };
             }
         }
     }
@@ -437,13 +437,13 @@ struct Window {
 }
 
 impl Window {
-    fn new(width: usize, height: usize, posx: usize, posy: usize) -> Self {
-        return Self {
-            width: width,
-            height: height,
-            pos_x: posx,
-            pos_y: posy,
-        };
+    fn new(width: usize, height: usize, pos_x: usize, pos_y: usize) -> Self {
+        Self {
+            width,
+            height,
+            pos_x,
+            pos_y,
+        }
     }
 
     fn clear(&self, buf: &mut Vec<Vec<Pixel>>, ch: char) {
@@ -451,12 +451,12 @@ impl Window {
         let screen_h = buf.len();
 
         for y in 0..self.height + 1 {
-            let target_y = (self.pos_y + y) as usize;
+            let target_y = self.pos_y + y;
             for x in 0..self.width {
-                let target_x = (self.pos_x + x + y) as usize;
-                if target_x < screen_w as usize && target_y < screen_h as usize {
+                let target_x = self.pos_x + x + y;
+                if target_x < screen_w && target_y < screen_h {
                     buf[target_y][target_x] = Pixel {
-                        ch: ch,
+                        ch,
                         color: Color::White,
                     }
                 }
@@ -599,7 +599,7 @@ fn main() -> io::Result<()> {
         let score_text = format!("Score: {}\t", state.score);
         let line_text = format!("Lines: {}\t", state.lines);
         let level_text = format!("Level: {}", state.level);
-        let help_text = format!("quit - q | left/right - 󰍞/󰍟 | down -  | drop - space");
+        let help_text = "quit - q | left/right - 󰍞/󰍟 | down -  | drop - space".to_string();
 
         let score_len = score_text.len();
         let line_len = line_text.len();
