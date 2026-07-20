@@ -45,7 +45,7 @@ struct GameState {
     piece_x: i32,
     piece_y: i32,
     next_piece: Tetromino,
-    game_board: [[bool; GAME_BOARD_W]; GAME_BOARD_H],
+    game_board: [[u8; GAME_BOARD_W]; GAME_BOARD_H],
 
     lock_timer: Option<Instant>,
 
@@ -105,7 +105,7 @@ impl GameState {
                 return false;
             }
 
-            if ny >= 0 && self.game_board[ny as usize][nx as usize] {
+            if ny >= 0 && self.game_board[ny as usize][nx as usize] != 0 {
                 return false;
             }
         }
@@ -156,7 +156,7 @@ impl GameState {
             let final_y = offset.1 + self.piece_y;
 
             if final_x >= 0 && final_y >= 0 {
-                self.game_board[final_y as usize][final_x as usize] = true;
+                self.game_board[final_y as usize][final_x as usize] = self.active_piece.color;
             }
         }
     }
@@ -193,7 +193,7 @@ impl GameState {
             let mut is_full = true;
 
             for x in 0..GAME_BOARD_W {
-                if !self.game_board[y][x] {
+                if self.game_board[y][x] == 0 {
                     is_full = false;
                     break;
                 }
@@ -204,7 +204,7 @@ impl GameState {
                     self.game_board[shift_y] = self.game_board[shift_y - 1];
                 }
 
-                self.game_board[0] = [false; GAME_BOARD_W];
+                self.game_board[0] = [0; GAME_BOARD_W];
                 cleared += 1;
             } else {
                 y -= 1;
@@ -260,8 +260,8 @@ impl GameState {
 
         for x in 0..self.game_board[0].len() {
             for y in 0..self.game_board.len() {
-                if self.game_board[y][x] {
-                    self.game_win_buf[y][x] = 1;
+                if self.game_board[y][x] != 0 {
+                    self.game_win_buf[y][x] = self.game_board[y][x];
                 }
             }
         }
@@ -273,7 +273,7 @@ impl GameState {
             if (screen_x as usize) < self.game_win_buf[0].len()
                 && (screen_y as usize) < self.game_win_buf.len()
             {
-                self.game_win_buf[screen_y as usize][screen_x as usize] = 1;
+                self.game_win_buf[screen_y as usize][screen_x as usize] = self.active_piece.color;
             }
         }
     }
@@ -284,13 +284,11 @@ impl GameState {
         let pos_y = NEXT_BOARD_H / 3;
 
         for offset in self.next_piece.blocks.iter() {
-            let screen_x = pos_x as i32 + offset.0;
-            let screen_y = pos_y as i32 + offset.1;
+            let screen_x = (pos_x as i32 + offset.0) as usize;
+            let screen_y = (pos_y as i32 + offset.1) as usize;
 
-            if (screen_x as usize) < self.next_win_buf[0].len()
-                && (screen_y as usize) < self.next_win_buf.len()
-            {
-                self.next_win_buf[screen_y as usize][screen_x as usize] = 1;
+            if (screen_x) < self.next_win_buf[0].len() && (screen_y) < self.next_win_buf.len() {
+                self.next_win_buf[screen_y][screen_x] = self.next_piece.color;
             }
         }
     }
@@ -300,6 +298,7 @@ impl GameState {
 struct Tetromino {
     blocks: [(i32, i32); 4],
     t_type: TetrominoType,
+    color: u8,
 }
 
 impl Tetromino {
@@ -308,30 +307,37 @@ impl Tetromino {
             TetrominoType::Square => Self {
                 blocks: [(0, 0), (1, 0), (0, 1), (1, 1)],
                 t_type,
+                color: 1,
             },
             TetrominoType::Line => Self {
                 blocks: [(-1, 0), (0, 0), (1, 0), (2, 0)],
                 t_type,
+                color: 2,
             },
             TetrominoType::Squiggly => Self {
                 blocks: [(-1, 0), (0, 0), (0, 1), (1, 1)],
                 t_type,
+                color: 3,
             },
             TetrominoType::ReverseSquiggly => Self {
                 blocks: [(-1, 1), (0, 1), (0, 0), (1, 0)],
                 t_type,
+                color: 4,
             },
             TetrominoType::TBlock => Self {
                 blocks: [(0, -1), (-1, 0), (0, 0), (1, 0)],
                 t_type,
+                color: 5,
             },
             TetrominoType::LBlock => Self {
                 blocks: [(1, -1), (-1, 0), (0, 0), (1, 0)],
                 t_type,
+                color: 6,
             },
             TetrominoType::ReverseLBlock => Self {
                 blocks: [(-1, -1), (-1, 0), (0, 0), (1, 0)],
                 t_type,
+                color: 6,
             },
         }
     }
@@ -395,13 +401,19 @@ impl Screen {
 
         for row in 0..board_rows {
             for col in (0..board_cols).rev() {
-                if board[row][col] != 1 {
+                if board[row][col] == 0 {
                     continue;
                 }
 
                 match win_type {
-                    WinType::Game => self.game_win.add_block(&mut self.buffer, col, row),
-                    WinType::Next => self.next_win.add_block(&mut self.buffer, col, row),
+                    WinType::Game => {
+                        self.game_win
+                            .add_block(&mut self.buffer, col, row, board[row][col])
+                    }
+                    WinType::Next => {
+                        self.next_win
+                            .add_block(&mut self.buffer, col, row, board[row][col])
+                    }
                 }
             }
         }
@@ -472,46 +484,48 @@ impl Window {
         }
     }
 
-    fn add_block(&self, buf: &mut Vec<Vec<Pixel>>, mut posx: usize, posy: usize) {
+    fn add_block(&self, buf: &mut Vec<Vec<Pixel>>, mut posx: usize, posy: usize, color: u8) {
         let height = buf.len();
         let width = buf[0].len();
         if posy + 1 + self.pos_y >= height || posx + posy + 3 + self.pos_x >= width {
             return;
         }
 
+        let (bright, dark) = get_color(color);
+
         posx *= 3; // projecting board coordinate to screen buffer coordinate, single block in board is 3 pixels wide in the screen buffer.
         buf[posy + self.pos_y][posx + posy + self.pos_x] = Pixel {
             ch: '/',
-            color: Color::Blue,
+            color: bright,
         };
         buf[posy + self.pos_y][posx + posy + 1 + self.pos_x] = Pixel {
             ch: '\\',
-            color: Color::Blue,
+            color: bright,
         };
 
         buf[posy + self.pos_y][posx + posy + 2 + self.pos_x] = Pixel {
             ch: '\\',
-            color: Color::Blue,
+            color: bright,
         };
         buf[posy + self.pos_y][posx + posy + 3 + self.pos_x] = Pixel {
             ch: '\\',
-            color: Color::Blue,
+            color: bright,
         };
         buf[posy + 1 + self.pos_y][posx + posy + self.pos_x] = Pixel {
             ch: '\\',
-            color: Color::Blue,
+            color: bright,
         };
         buf[posy + 1 + self.pos_y][posx + posy + 1 + self.pos_x] = Pixel {
             ch: '/',
-            color: Color::DarkBlue,
+            color: dark,
         };
         buf[posy + 1 + self.pos_y][posx + posy + 2 + self.pos_x] = Pixel {
             ch: '_',
-            color: Color::DarkBlue,
+            color: dark,
         };
         buf[posy + 1 + self.pos_y][posx + posy + 3 + self.pos_x] = Pixel {
             ch: '/',
-            color: Color::DarkBlue,
+            color: dark,
         };
     }
 }
@@ -528,6 +542,18 @@ impl Default for Pixel {
             ch: ' ',
             color: Color::Reset,
         }
+    }
+}
+
+fn get_color(color_index: u8) -> (Color, Color) {
+    match color_index {
+        1 => (Color::Red, Color::DarkRed),
+        2 => (Color::Green, Color::DarkGreen),
+        3 => (Color::Blue, Color::DarkBlue),
+        4 => (Color::Yellow, Color::DarkYellow),
+        5 => (Color::Magenta, Color::DarkMagenta),
+        6 => (Color::Cyan, Color::DarkCyan),
+        _ => (Color::White, Color::DarkGrey),
     }
 }
 
