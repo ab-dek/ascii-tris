@@ -127,6 +127,7 @@ impl GameState {
             (-1, 0), // kick 1 step to left
             (1, 0),  // kick 1 step to right
             (0, -1), // kick up
+            (0, 1),  // kick down
             (-2, 0), // kick 2 steps to left
             (2, 0),  // kick 2 steps to right
         ];
@@ -255,6 +256,16 @@ impl GameState {
         Ok(())
     }
 
+    fn get_ghost_pos_y(&self) -> i32 {
+        let mut ghost_pos_y = self.piece_y;
+
+        while self.is_valid_pos(self.piece_x, ghost_pos_y + 1, &self.active_piece) {
+            ghost_pos_y += 1;
+        }
+
+        ghost_pos_y
+    }
+
     fn update_game_win_buf(&mut self) {
         self.game_win_buf = [[0; GAME_BOARD_W]; GAME_BOARD_H];
 
@@ -263,6 +274,18 @@ impl GameState {
                 if self.game_board[y][x] != 0 {
                     self.game_win_buf[y][x] = self.game_board[y][x];
                 }
+            }
+        }
+
+        // TODO: refactor this out into a fn, something like draw_piece(tet, x, y, win)
+        for offset in self.active_piece.blocks.iter() {
+            let screen_x = self.piece_x + offset.0;
+            let screen_y = self.get_ghost_pos_y() + offset.1;
+
+            if (screen_x as usize) < self.game_win_buf[0].len()
+                && (screen_y as usize) < self.game_win_buf.len()
+            {
+                self.game_win_buf[screen_y as usize][screen_x as usize] = 7;
             }
         }
 
@@ -469,7 +492,7 @@ impl Window {
                 if target_x < screen_w && target_y < screen_h {
                     buf[target_y][target_x] = Pixel {
                         ch,
-                        color: Color::White,
+                        color: Color::DarkGrey,
                     }
                 }
 
@@ -553,7 +576,7 @@ fn get_color(color_index: u8) -> (Color, Color) {
         4 => (Color::Yellow, Color::DarkYellow),
         5 => (Color::Magenta, Color::DarkMagenta),
         6 => (Color::Cyan, Color::DarkCyan),
-        _ => (Color::White, Color::DarkGrey),
+        _ => (Color::DarkGrey, Color::DarkGrey),
     }
 }
 
@@ -595,6 +618,7 @@ fn main() -> io::Result<()> {
                         state.spawn_new_piece();
 
                         fall_speed = Duration::from_millis(state.speed);
+                        last_fall_time = Instant::now();
                         state.lock_timer = None;
                     }
                 }
@@ -657,6 +681,7 @@ fn main() -> io::Result<()> {
     println!("-- GAME OVER --");
     println!("Score: {}", state.score);
     println!("Lines Cleared: {}", state.lines);
+    println!("Level: {}", state.level);
 
     Ok(())
 }
