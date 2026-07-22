@@ -42,10 +42,10 @@ enum TetrominoType {
 #[derive(Default, Debug)]
 struct GameState {
     active_piece: Tetromino,
-    piece_x: i32,
-    piece_y: i32,
+    piece_x: i8,
+    piece_y: i8,
     next_piece: Tetromino,
-    game_board: [[u8; GAME_BOARD_W]; GAME_BOARD_H],
+    game_board: [[BlockColor; GAME_BOARD_W]; GAME_BOARD_H],
 
     lock_timer: Option<Instant>,
 
@@ -56,8 +56,8 @@ struct GameState {
     lines: u32,
     level: u32,
 
-    game_win_buf: [[u8; GAME_BOARD_W]; GAME_BOARD_H],
-    next_win_buf: [[u8; NEXT_BOARD_W]; NEXT_BOARD_H],
+    game_win_buf: [[BlockColor; GAME_BOARD_W]; GAME_BOARD_H],
+    next_win_buf: [[BlockColor; NEXT_BOARD_W]; NEXT_BOARD_H],
     is_running: bool,
 }
 
@@ -92,27 +92,27 @@ impl GameState {
         Tetromino::new(next_type)
     }
 
-    fn is_valid_pos(&self, x: i32, y: i32, piece: &Tetromino) -> bool {
+    fn is_valid_pos(&self, x: i8, y: i8, piece: &Tetromino) -> bool {
         for offset in piece.blocks.iter() {
             let nx = x + offset.0;
             let ny = y + offset.1;
 
-            if nx < 0 || nx >= GAME_BOARD_W as i32 {
+            if nx < 0 || nx >= GAME_BOARD_W as i8 {
                 return false;
             }
 
-            if ny < 0 || ny >= GAME_BOARD_H as i32 {
+            if ny < 0 || ny >= GAME_BOARD_H as i8 {
                 return false;
             }
 
-            if ny >= 0 && self.game_board[ny as usize][nx as usize] != 0 {
+            if !matches!(self.game_board[ny as usize][nx as usize], BlockColor::None) {
                 return false;
             }
         }
         true
     }
 
-    fn move_piece(&mut self, x: i32, y: i32) {
+    fn move_piece(&mut self, x: i8, y: i8) {
         if self.is_valid_pos(self.piece_x + x, self.piece_y + y, &self.active_piece) {
             self.piece_x += x;
             self.piece_y += y;
@@ -166,7 +166,7 @@ impl GameState {
         self.active_piece = self.next_piece.clone();
         self.next_piece = self.new_piece();
 
-        self.piece_x = (GAME_BOARD_W / 2) as i32 - 1;
+        self.piece_x = (GAME_BOARD_W / 2) as i8 - 1;
         self.piece_y = 0;
 
         // pushing down the piece so that its entirely visible
@@ -194,7 +194,7 @@ impl GameState {
             let mut is_full = true;
 
             for x in 0..GAME_BOARD_W {
-                if self.game_board[y][x] == 0 {
+                if matches!(self.game_board[y][x], BlockColor::None) {
                     is_full = false;
                     break;
                 }
@@ -205,7 +205,7 @@ impl GameState {
                     self.game_board[shift_y] = self.game_board[shift_y - 1];
                 }
 
-                self.game_board[0] = [0; GAME_BOARD_W];
+                self.game_board[0] = [BlockColor::None; GAME_BOARD_W];
                 cleared += 1;
             } else {
                 y -= 1;
@@ -256,7 +256,7 @@ impl GameState {
         Ok(())
     }
 
-    fn get_ghost_pos_y(&self) -> i32 {
+    fn get_ghost_pos_y(&self) -> i8 {
         let mut ghost_pos_y = self.piece_y;
 
         while self.is_valid_pos(self.piece_x, ghost_pos_y + 1, &self.active_piece) {
@@ -267,16 +267,18 @@ impl GameState {
     }
 
     fn update_game_win_buf(&mut self) {
-        self.game_win_buf = [[0; GAME_BOARD_W]; GAME_BOARD_H];
+        self.game_win_buf = [[BlockColor::None; GAME_BOARD_W]; GAME_BOARD_H];
 
+        // add locked pieces
         for x in 0..self.game_board[0].len() {
             for y in 0..self.game_board.len() {
-                if self.game_board[y][x] != 0 {
+                if !matches!(self.game_board[y][x], BlockColor::None) {
                     self.game_win_buf[y][x] = self.game_board[y][x];
                 }
             }
         }
 
+        // add ghost piece
         // TODO: refactor this out into a fn, something like draw_piece(tet, x, y, win)
         for offset in self.active_piece.blocks.iter() {
             let screen_x = self.piece_x + offset.0;
@@ -285,10 +287,11 @@ impl GameState {
             if (screen_x as usize) < self.game_win_buf[0].len()
                 && (screen_y as usize) < self.game_win_buf.len()
             {
-                self.game_win_buf[screen_y as usize][screen_x as usize] = 7;
+                self.game_win_buf[screen_y as usize][screen_x as usize] = BlockColor::DarkGrey;
             }
         }
 
+        // add active piece
         for offset in self.active_piece.blocks.iter() {
             let screen_x = self.piece_x + offset.0;
             let screen_y = self.piece_y + offset.1;
@@ -302,13 +305,13 @@ impl GameState {
     }
 
     fn update_next_win_buf(&mut self) {
-        self.next_win_buf = [[0; NEXT_BOARD_W]; NEXT_BOARD_H];
+        self.next_win_buf = [[BlockColor::None; NEXT_BOARD_W]; NEXT_BOARD_H];
         let pos_x = NEXT_BOARD_W / 3;
         let pos_y = NEXT_BOARD_H / 3;
 
         for offset in self.next_piece.blocks.iter() {
-            let screen_x = (pos_x as i32 + offset.0) as usize;
-            let screen_y = (pos_y as i32 + offset.1) as usize;
+            let screen_x = (pos_x as i8 + offset.0) as usize;
+            let screen_y = (pos_y as i8 + offset.1) as usize;
 
             if (screen_x) < self.next_win_buf[0].len() && (screen_y) < self.next_win_buf.len() {
                 self.next_win_buf[screen_y][screen_x] = self.next_piece.color;
@@ -319,9 +322,9 @@ impl GameState {
 
 #[derive(Default, Clone, Debug)]
 struct Tetromino {
-    blocks: [(i32, i32); 4],
+    blocks: [(i8, i8); 4],
     t_type: TetrominoType,
-    color: u8,
+    color: BlockColor,
 }
 
 impl Tetromino {
@@ -330,37 +333,37 @@ impl Tetromino {
             TetrominoType::Square => Self {
                 blocks: [(0, 0), (1, 0), (0, 1), (1, 1)],
                 t_type,
-                color: 1,
+                color: BlockColor::Blue,
             },
             TetrominoType::Line => Self {
                 blocks: [(-1, 0), (0, 0), (1, 0), (2, 0)],
                 t_type,
-                color: 2,
+                color: BlockColor::Green,
             },
             TetrominoType::Squiggly => Self {
                 blocks: [(-1, 0), (0, 0), (0, 1), (1, 1)],
                 t_type,
-                color: 3,
+                color: BlockColor::Cyan,
             },
             TetrominoType::ReverseSquiggly => Self {
                 blocks: [(-1, 1), (0, 1), (0, 0), (1, 0)],
                 t_type,
-                color: 4,
+                color: BlockColor::Magenta,
             },
             TetrominoType::TBlock => Self {
                 blocks: [(0, -1), (-1, 0), (0, 0), (1, 0)],
                 t_type,
-                color: 5,
+                color: BlockColor::Yellow,
             },
             TetrominoType::LBlock => Self {
                 blocks: [(1, -1), (-1, 0), (0, 0), (1, 0)],
                 t_type,
-                color: 6,
+                color: BlockColor::Red,
             },
             TetrominoType::ReverseLBlock => Self {
                 blocks: [(-1, -1), (-1, 0), (0, 0), (1, 0)],
                 t_type,
-                color: 6,
+                color: BlockColor::Blue,
             },
         }
     }
@@ -417,14 +420,14 @@ impl Screen {
     fn update_buf<const COLS: usize, const ROWS: usize>(
         &mut self,
         win_type: WinType,
-        board: &[[u8; COLS]; ROWS],
+        board: &[[BlockColor; COLS]; ROWS],
     ) {
         let board_cols = board[0].len();
         let board_rows = board.len();
 
         for row in 0..board_rows {
             for col in (0..board_cols).rev() {
-                if board[row][col] == 0 {
+                if matches!(board[row][col], BlockColor::None) {
                     continue;
                 }
 
@@ -507,14 +510,20 @@ impl Window {
         }
     }
 
-    fn add_block(&self, buf: &mut Vec<Vec<Pixel>>, mut posx: usize, posy: usize, color: u8) {
+    fn add_block(
+        &self,
+        buf: &mut Vec<Vec<Pixel>>,
+        mut posx: usize,
+        posy: usize,
+        color: BlockColor,
+    ) {
         let height = buf.len();
         let width = buf[0].len();
         if posy + 1 + self.pos_y >= height || posx + posy + 3 + self.pos_x >= width {
             return;
         }
 
-        let (bright, dark) = get_color(color);
+        let (bright, dark) = BlockColor::get_color(color);
 
         posx *= 3; // projecting board coordinate to screen buffer coordinate, single block in board is 3 pixels wide in the screen buffer.
         buf[posy + self.pos_y][posx + posy + self.pos_x] = Pixel {
@@ -568,15 +577,31 @@ impl Default for Pixel {
     }
 }
 
-fn get_color(color_index: u8) -> (Color, Color) {
-    match color_index {
-        1 => (Color::Red, Color::DarkRed),
-        2 => (Color::Green, Color::DarkGreen),
-        3 => (Color::Blue, Color::DarkBlue),
-        4 => (Color::Yellow, Color::DarkYellow),
-        5 => (Color::Magenta, Color::DarkMagenta),
-        6 => (Color::Cyan, Color::DarkCyan),
-        _ => (Color::DarkGrey, Color::DarkGrey),
+#[derive(Default, Debug, Clone, Copy)]
+enum BlockColor {
+    #[default]
+    None,
+    Red,
+    Green,
+    Blue,
+    Yellow,
+    Magenta,
+    Cyan,
+    DarkGrey,
+}
+
+impl BlockColor {
+    fn get_color(self) -> (Color, Color) {
+        match self {
+            BlockColor::None => (Color::Reset, Color::Reset),
+            BlockColor::Red => (Color::Red, Color::DarkRed),
+            BlockColor::Green => (Color::Green, Color::DarkGreen),
+            BlockColor::Blue => (Color::Blue, Color::DarkBlue),
+            BlockColor::Yellow => (Color::Yellow, Color::DarkYellow),
+            BlockColor::Magenta => (Color::Magenta, Color::DarkMagenta),
+            BlockColor::Cyan => (Color::Cyan, Color::DarkCyan),
+            BlockColor::DarkGrey => (Color::DarkGrey, Color::DarkGrey),
+        }
     }
 }
 
@@ -584,6 +609,7 @@ fn main() -> io::Result<()> {
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     enable_raw_mode()?;
+    handle_panic();
 
     execute!(
         stdout,
@@ -684,4 +710,12 @@ fn main() -> io::Result<()> {
     println!("Level: {}", state.level);
 
     Ok(())
+}
+
+fn handle_panic() {
+    std::panic::set_hook(Box::new(|panic_hook_info| {
+        let _ = execute!(io::stdout(), cursor::Show, LeaveAlternateScreen);
+        let _ = disable_raw_mode();
+        eprintln!("panic: {}", panic_hook_info)
+    }));
 }
