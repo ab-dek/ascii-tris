@@ -48,6 +48,7 @@ struct GameState {
     game_board: [[BlockColor; GAME_BOARD_W]; GAME_BOARD_H],
 
     lock_timer: Option<Instant>,
+    lock_reset_limit: u8,
 
     bag: Vec<TetrominoType>,
 
@@ -66,6 +67,7 @@ impl GameState {
         Self {
             speed: 800,
             level: 1,
+            lock_reset_limit: 15,
             is_running: true,
             ..Default::default()
         }
@@ -116,6 +118,11 @@ impl GameState {
         if self.is_valid_pos(self.piece_x + x, self.piece_y + y, &self.active_piece) {
             self.piece_x += x;
             self.piece_y += y;
+
+            if self.piece_landed() && self.lock_reset_limit > 0 {
+                self.lock_timer = Some(Instant::now());
+                self.lock_reset_limit -= 1;
+            }
         }
     }
 
@@ -140,6 +147,12 @@ impl GameState {
                 self.active_piece = rotated;
                 self.piece_x = nx;
                 self.piece_y = ny;
+
+                if self.piece_landed() && self.lock_reset_limit > 0 {
+                    self.lock_timer = Some(Instant::now());
+                    self.lock_reset_limit -= 1;
+                }
+
                 return;
             }
         }
@@ -149,6 +162,7 @@ impl GameState {
         while self.is_valid_pos(self.piece_x, self.piece_y + 1, &self.active_piece) {
             self.piece_y += 1;
         }
+        self.lock_piece();
     }
 
     fn lock_piece(&mut self) {
@@ -646,6 +660,7 @@ fn main() -> io::Result<()> {
                         fall_speed = Duration::from_millis(state.speed);
                         last_fall_time = Instant::now();
                         state.lock_timer = None;
+                        state.lock_reset_limit = 15;
                     }
                 }
                 None => state.lock_timer = Some(Instant::now()),
