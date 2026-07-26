@@ -39,13 +39,48 @@ enum TetrominoType {
     ReverseLBlock,
 }
 
+#[derive(Debug)]
+struct Board<const W: usize, const H: usize> {
+    grid: [[BlockColor; W]; H],
+}
+
+impl<const W: usize, const H: usize> Default for Board<W, H> {
+    fn default() -> Self {
+        Self {
+            grid: [[BlockColor::None; W]; H],
+        }
+    }
+}
+
+impl<const W: usize, const H: usize> Board<W, H> {
+    fn get(&self, x: usize, y: usize) -> BlockColor {
+        self.grid[y][x]
+    }
+
+    fn set(&mut self, x: usize, y: usize, color: BlockColor) {
+        self.grid[y][x] = color;
+    }
+
+    fn width(&self) -> usize {
+        W
+    }
+
+    fn height(&self) -> usize {
+        H
+    }
+
+    fn is_empty(&self, x: usize, y: usize) -> bool {
+        return matches!(self.grid[y][x], BlockColor::None);
+    }
+}
+
 #[derive(Default, Debug)]
 struct GameState {
     active_piece: Tetromino,
     piece_x: i8,
     piece_y: i8,
     next_piece: Tetromino,
-    game_board: [[BlockColor; GAME_BOARD_W]; GAME_BOARD_H],
+    game_board: Board<GAME_BOARD_W, GAME_BOARD_H>, // locked pieces
 
     lock_timer: Option<Instant>,
     lock_reset_limit: u8,
@@ -57,8 +92,8 @@ struct GameState {
     lines: u32,
     level: u32,
 
-    game_win_buf: [[BlockColor; GAME_BOARD_W]; GAME_BOARD_H],
-    next_win_buf: [[BlockColor; NEXT_BOARD_W]; NEXT_BOARD_H],
+    game_win_buf: Board<GAME_BOARD_W, GAME_BOARD_H>, // holds what will be rendered to game window
+    next_win_buf: Board<NEXT_BOARD_W, NEXT_BOARD_H>,
     is_running: bool,
 }
 
@@ -107,7 +142,10 @@ impl GameState {
                 return false;
             }
 
-            if !matches!(self.game_board[ny as usize][nx as usize], BlockColor::None) {
+            if !matches!(
+                self.game_board.grid[ny as usize][nx as usize],
+                BlockColor::None
+            ) {
                 return false;
             }
         }
@@ -171,7 +209,7 @@ impl GameState {
             let final_y = offset.1 + self.piece_y;
 
             if final_x >= 0 && final_y >= 0 {
-                self.game_board[final_y as usize][final_x as usize] = self.active_piece.color;
+                self.game_board.grid[final_y as usize][final_x as usize] = self.active_piece.color;
             }
         }
     }
@@ -208,7 +246,7 @@ impl GameState {
             let mut is_full = true;
 
             for x in 0..GAME_BOARD_W {
-                if matches!(self.game_board[y][x], BlockColor::None) {
+                if matches!(self.game_board.grid[y][x], BlockColor::None) {
                     is_full = false;
                     break;
                 }
@@ -216,10 +254,10 @@ impl GameState {
 
             if is_full {
                 for shift_y in (1..=y).rev() {
-                    self.game_board[shift_y] = self.game_board[shift_y - 1];
+                    self.game_board.grid[shift_y] = self.game_board.grid[shift_y - 1];
                 }
 
-                self.game_board[0] = [BlockColor::None; GAME_BOARD_W];
+                self.game_board.grid[0] = [BlockColor::None; GAME_BOARD_W];
                 cleared += 1;
             } else {
                 y -= 1;
@@ -249,8 +287,9 @@ impl GameState {
                 8 => 220,
                 9 => 130,
                 10 => 100,
-                11 => 80,
-                _ => 0,
+                11..=13 => 80,
+                14..=18 => 50,
+                _ => 16,
             };
         }
     }
@@ -281,13 +320,13 @@ impl GameState {
     }
 
     fn update_game_win_buf(&mut self) {
-        self.game_win_buf = [[BlockColor::None; GAME_BOARD_W]; GAME_BOARD_H];
+        self.game_win_buf.grid = [[BlockColor::None; GAME_BOARD_W]; GAME_BOARD_H];
 
         // add locked pieces
-        for x in 0..self.game_board[0].len() {
-            for y in 0..self.game_board.len() {
-                if !matches!(self.game_board[y][x], BlockColor::None) {
-                    self.game_win_buf[y][x] = self.game_board[y][x];
+        for x in 0..self.game_board.grid[0].len() {
+            for y in 0..self.game_board.grid.len() {
+                if !matches!(self.game_board.grid[y][x], BlockColor::None) {
+                    self.game_win_buf.grid[y][x] = self.game_board.grid[y][x];
                 }
             }
         }
@@ -298,10 +337,10 @@ impl GameState {
             let screen_x = self.piece_x + offset.0;
             let screen_y = self.get_ghost_pos_y() + offset.1;
 
-            if (screen_x as usize) < self.game_win_buf[0].len()
-                && (screen_y as usize) < self.game_win_buf.len()
+            if (screen_x as usize) < self.game_win_buf.grid[0].len()
+                && (screen_y as usize) < self.game_win_buf.grid.len()
             {
-                self.game_win_buf[screen_y as usize][screen_x as usize] = BlockColor::DarkGrey;
+                self.game_win_buf.grid[screen_y as usize][screen_x as usize] = BlockColor::DarkGrey;
             }
         }
 
@@ -310,16 +349,17 @@ impl GameState {
             let screen_x = self.piece_x + offset.0;
             let screen_y = self.piece_y + offset.1;
 
-            if (screen_x as usize) < self.game_win_buf[0].len()
-                && (screen_y as usize) < self.game_win_buf.len()
+            if (screen_x as usize) < self.game_win_buf.grid[0].len()
+                && (screen_y as usize) < self.game_win_buf.grid.len()
             {
-                self.game_win_buf[screen_y as usize][screen_x as usize] = self.active_piece.color;
+                self.game_win_buf.grid[screen_y as usize][screen_x as usize] =
+                    self.active_piece.color;
             }
         }
     }
 
     fn update_next_win_buf(&mut self) {
-        self.next_win_buf = [[BlockColor::None; NEXT_BOARD_W]; NEXT_BOARD_H];
+        self.next_win_buf.grid = [[BlockColor::None; NEXT_BOARD_W]; NEXT_BOARD_H];
         let pos_x = NEXT_BOARD_W / 3;
         let pos_y = NEXT_BOARD_H / 3;
 
@@ -327,8 +367,10 @@ impl GameState {
             let screen_x = (pos_x as i8 + offset.0) as usize;
             let screen_y = (pos_y as i8 + offset.1) as usize;
 
-            if (screen_x) < self.next_win_buf[0].len() && (screen_y) < self.next_win_buf.len() {
-                self.next_win_buf[screen_y][screen_x] = self.next_piece.color;
+            if (screen_x) < self.next_win_buf.grid[0].len()
+                && (screen_y) < self.next_win_buf.grid.len()
+            {
+                self.next_win_buf.grid[screen_y][screen_x] = self.next_piece.color;
             }
         }
     }
@@ -347,7 +389,7 @@ impl Tetromino {
             TetrominoType::Square => Self {
                 blocks: [(0, 0), (1, 0), (0, 1), (1, 1)],
                 t_type,
-                color: BlockColor::Blue,
+                color: BlockColor::Green,
             },
             TetrominoType::Line => Self {
                 blocks: [(-1, 0), (0, 0), (1, 0), (2, 0)],
@@ -434,25 +476,25 @@ impl Screen {
     fn update_buf<const COLS: usize, const ROWS: usize>(
         &mut self,
         win_type: WinType,
-        board: &[[BlockColor; COLS]; ROWS],
+        board: &Board<COLS, ROWS>,
     ) {
-        let board_cols = board[0].len();
-        let board_rows = board.len();
+        let board_cols = board.grid[0].len();
+        let board_rows = board.grid.len();
 
         for row in 0..board_rows {
             for col in (0..board_cols).rev() {
-                if matches!(board[row][col], BlockColor::None) {
+                if matches!(board.grid[row][col], BlockColor::None) {
                     continue;
                 }
 
                 match win_type {
                     WinType::Game => {
                         self.game_win
-                            .add_block(&mut self.buffer, col, row, board[row][col])
+                            .add_block(&mut self.buffer, col, row, board.grid[row][col])
                     }
                     WinType::Next => {
                         self.next_win
-                            .add_block(&mut self.buffer, col, row, board[row][col])
+                            .add_block(&mut self.buffer, col, row, board.grid[row][col])
                     }
                 }
             }
