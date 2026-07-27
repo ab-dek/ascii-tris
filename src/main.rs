@@ -53,12 +53,18 @@ impl<const W: usize, const H: usize> Default for Board<W, H> {
 }
 
 impl<const W: usize, const H: usize> Board<W, H> {
-    fn get(&self, x: usize, y: usize) -> BlockColor {
-        self.grid[y][x]
+    fn get(&self, x: usize, y: usize) -> Option<BlockColor> {
+        if x < W && y < H {
+            Some(self.grid[y][x])
+        } else {
+            None
+        }
     }
 
     fn set(&mut self, x: usize, y: usize, color: BlockColor) {
-        self.grid[y][x] = color;
+        if x < W && y < H {
+            self.grid[y][x] = color;
+        }
     }
 
     fn width(&self) -> usize {
@@ -73,14 +79,12 @@ impl<const W: usize, const H: usize> Board<W, H> {
         return matches!(self.grid[y][x], BlockColor::None);
     }
 
-    fn add_piece(&mut self, tet: Tetromino, x: i8, y: i8) {
+    fn add_piece(&mut self, tet: Tetromino, x: i8, y: i8, color: BlockColor) {
         for offset in tet.blocks.iter() {
             let pos_x = (x + offset.0) as usize;
             let pos_y = (y + offset.1) as usize;
 
-            if pos_x < self.width() && pos_y < self.height() {
-                self.set(pos_x, pos_y, tet.color);
-            }
+            self.set(pos_x, pos_y, color);
         }
     }
 }
@@ -95,6 +99,7 @@ struct GameState {
 
     lock_timer: Option<Instant>,
     lock_reset_limit: u8,
+    lock_delay: Duration,
 
     bag: Vec<TetrominoType>,
 
@@ -114,6 +119,7 @@ impl GameState {
             speed: 800,
             level: 1,
             lock_reset_limit: 15,
+            lock_delay: Duration::from_millis(500),
             is_running: true,
             ..Default::default()
         }
@@ -208,7 +214,7 @@ impl GameState {
         while self.is_valid_pos(self.piece_x, self.piece_y + 1, &self.active_piece) {
             self.piece_y += 1;
         }
-        self.lock_piece();
+        self.lock_timer = Some(Instant::now() - self.lock_delay)
     }
 
     fn lock_piece(&mut self) {
@@ -335,19 +341,27 @@ impl GameState {
         for x in 0..self.game_board.width() {
             for y in 0..self.game_board.height() {
                 if !self.game_board.is_cell_empty(x, y) {
-                    let color_value = self.game_board.get(x, y);
+                    let color_value = self.game_board.get(x, y).unwrap_or_default();
                     self.game_win_buf.set(x, y, color_value);
                 }
             }
         }
 
         // add ghost piece
-        self.game_win_buf
-            .add_piece(self.active_piece, self.piece_x, self.get_ghost_pos_y());
+        self.game_win_buf.add_piece(
+            self.active_piece,
+            self.piece_x,
+            self.get_ghost_pos_y(),
+            BlockColor::DarkGrey,
+        );
 
         // add active piece
-        self.game_win_buf
-            .add_piece(self.active_piece, self.piece_x, self.piece_y);
+        self.game_win_buf.add_piece(
+            self.active_piece,
+            self.piece_x,
+            self.piece_y,
+            self.active_piece.color,
+        );
     }
 
     fn update_next_win_buf(&mut self) {
@@ -355,7 +369,8 @@ impl GameState {
         let pos_x = (NEXT_BOARD_W / 3) as i8;
         let pos_y = (NEXT_BOARD_H / 3) as i8;
 
-        self.next_win_buf.add_piece(self.next_piece, pos_x, pos_y);
+        self.next_win_buf
+            .add_piece(self.next_piece, pos_x, pos_y, self.next_piece.color);
     }
 }
 
@@ -408,7 +423,7 @@ impl Tetromino {
     }
 
     fn get_rotated_copy(&mut self) -> Self {
-        let mut rotated = self.clone();
+        let mut rotated = *self;
         if matches!(rotated.t_type, TetrominoType::Square) {
             return rotated;
         }
@@ -471,14 +486,18 @@ impl Screen {
                 }
 
                 match win_type {
-                    WinType::Game => {
-                        self.game_win
-                            .add_block(&mut self.buffer, col, row, board.get(col, row))
-                    }
-                    WinType::Next => {
-                        self.next_win
-                            .add_block(&mut self.buffer, col, row, board.get(col, row))
-                    }
+                    WinType::Game => self.game_win.add_block(
+                        &mut self.buffer,
+                        col,
+                        row,
+                        board.get(col, row).unwrap_or_default(),
+                    ),
+                    WinType::Next => self.next_win.add_block(
+                        &mut self.buffer,
+                        col,
+                        row,
+                        board.get(col, row).unwrap_or_default(),
+                    ),
                 }
             }
         }
@@ -664,7 +683,6 @@ fn main() -> io::Result<()> {
 
     let mut last_fall_time = Instant::now();
     let mut fall_speed = Duration::from_millis(state.speed);
-    let lock_delay = Duration::from_millis(500);
 
     while state.is_running {
         // -- INPUT --
@@ -677,7 +695,7 @@ fn main() -> io::Result<()> {
         if state.piece_landed() {
             match state.lock_timer {
                 Some(timer) => {
-                    if timer.elapsed() >= lock_delay {
+                    if timer.elapsed() >= state.lock_delay {
                         state.lock_piece();
                         state.clear_line();
                         state.spawn_new_piece();
