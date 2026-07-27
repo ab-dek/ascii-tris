@@ -27,7 +27,7 @@ const GAME_BOARD_WIN_H: usize = GAME_BOARD_H;
 const NEXT_BOARD_WIN_W: usize = NEXT_BOARD_W * 3;
 const NEXT_BOARD_WIN_H: usize = NEXT_BOARD_H;
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 enum TetrominoType {
     #[default]
     Square,
@@ -39,16 +39,67 @@ enum TetrominoType {
     ReverseLBlock,
 }
 
+#[derive(Debug)]
+struct Board<const W: usize, const H: usize> {
+    grid: [[BlockColor; W]; H],
+}
+
+impl<const W: usize, const H: usize> Default for Board<W, H> {
+    fn default() -> Self {
+        Self {
+            grid: [[BlockColor::None; W]; H],
+        }
+    }
+}
+
+impl<const W: usize, const H: usize> Board<W, H> {
+    fn get(&self, x: usize, y: usize) -> Option<BlockColor> {
+        if x < W && y < H {
+            Some(self.grid[y][x])
+        } else {
+            None
+        }
+    }
+
+    fn set(&mut self, x: usize, y: usize, color: BlockColor) {
+        if x < W && y < H {
+            self.grid[y][x] = color;
+        }
+    }
+
+    fn width(&self) -> usize {
+        W
+    }
+
+    fn height(&self) -> usize {
+        H
+    }
+
+    fn is_cell_empty(&self, x: usize, y: usize) -> bool {
+        return matches!(self.grid[y][x], BlockColor::None);
+    }
+
+    fn add_piece(&mut self, tet: Tetromino, x: i8, y: i8, color: BlockColor) {
+        for offset in tet.blocks.iter() {
+            let pos_x = (x + offset.0) as usize;
+            let pos_y = (y + offset.1) as usize;
+
+            self.set(pos_x, pos_y, color);
+        }
+    }
+}
+
 #[derive(Default, Debug)]
 struct GameState {
     active_piece: Tetromino,
     piece_x: i8,
     piece_y: i8,
     next_piece: Tetromino,
-    game_board: [[BlockColor; GAME_BOARD_W]; GAME_BOARD_H],
+    game_board: Board<GAME_BOARD_W, GAME_BOARD_H>, // locked pieces
 
     lock_timer: Option<Instant>,
     lock_reset_limit: u8,
+    lock_delay: Duration,
 
     bag: Vec<TetrominoType>,
 
@@ -57,8 +108,8 @@ struct GameState {
     lines: u32,
     level: u32,
 
-    game_win_buf: [[BlockColor; GAME_BOARD_W]; GAME_BOARD_H],
-    next_win_buf: [[BlockColor; NEXT_BOARD_W]; NEXT_BOARD_H],
+    game_win_buf: Board<GAME_BOARD_W, GAME_BOARD_H>, // holds what will be rendered to game window
+    next_win_buf: Board<NEXT_BOARD_W, NEXT_BOARD_H>,
     is_running: bool,
 }
 
@@ -68,6 +119,7 @@ impl GameState {
             speed: 800,
             level: 1,
             lock_reset_limit: 15,
+            lock_delay: Duration::from_millis(500),
             is_running: true,
             ..Default::default()
         }
@@ -107,7 +159,7 @@ impl GameState {
                 return false;
             }
 
-            if !matches!(self.game_board[ny as usize][nx as usize], BlockColor::None) {
+            if !self.game_board.is_cell_empty(nx as usize, ny as usize) {
                 return false;
             }
         }
@@ -162,7 +214,7 @@ impl GameState {
         while self.is_valid_pos(self.piece_x, self.piece_y + 1, &self.active_piece) {
             self.piece_y += 1;
         }
-        self.lock_piece();
+        self.lock_timer = Some(Instant::now() - self.lock_delay)
     }
 
     fn lock_piece(&mut self) {
@@ -171,13 +223,14 @@ impl GameState {
             let final_y = offset.1 + self.piece_y;
 
             if final_x >= 0 && final_y >= 0 {
-                self.game_board[final_y as usize][final_x as usize] = self.active_piece.color;
+                self.game_board
+                    .set(final_x as usize, final_y as usize, self.active_piece.color);
             }
         }
     }
 
     fn spawn_new_piece(&mut self) {
-        self.active_piece = self.next_piece.clone();
+        self.active_piece = self.next_piece;
         self.next_piece = self.new_piece();
 
         self.piece_x = (GAME_BOARD_W / 2) as i8 - 1;
@@ -208,7 +261,7 @@ impl GameState {
             let mut is_full = true;
 
             for x in 0..GAME_BOARD_W {
-                if matches!(self.game_board[y][x], BlockColor::None) {
+                if self.game_board.is_cell_empty(x, y) {
                     is_full = false;
                     break;
                 }
@@ -216,10 +269,10 @@ impl GameState {
 
             if is_full {
                 for shift_y in (1..=y).rev() {
-                    self.game_board[shift_y] = self.game_board[shift_y - 1];
+                    self.game_board.grid[shift_y] = self.game_board.grid[shift_y - 1];
                 }
 
-                self.game_board[0] = [BlockColor::None; GAME_BOARD_W];
+                self.game_board.grid[0] = [BlockColor::None; GAME_BOARD_W];
                 cleared += 1;
             } else {
                 y -= 1;
@@ -249,8 +302,9 @@ impl GameState {
                 8 => 220,
                 9 => 130,
                 10 => 100,
-                11 => 80,
-                _ => 0,
+                11..=13 => 80,
+                14..=18 => 50,
+                _ => 16,
             };
         }
     }
@@ -281,60 +335,46 @@ impl GameState {
     }
 
     fn update_game_win_buf(&mut self) {
-        self.game_win_buf = [[BlockColor::None; GAME_BOARD_W]; GAME_BOARD_H];
+        self.game_win_buf.grid = [[BlockColor::None; GAME_BOARD_W]; GAME_BOARD_H];
 
         // add locked pieces
-        for x in 0..self.game_board[0].len() {
-            for y in 0..self.game_board.len() {
-                if !matches!(self.game_board[y][x], BlockColor::None) {
-                    self.game_win_buf[y][x] = self.game_board[y][x];
+        for x in 0..self.game_board.width() {
+            for y in 0..self.game_board.height() {
+                if !self.game_board.is_cell_empty(x, y) {
+                    let color_value = self.game_board.get(x, y).unwrap_or_default();
+                    self.game_win_buf.set(x, y, color_value);
                 }
             }
         }
 
         // add ghost piece
-        // TODO: refactor this out into a fn, something like draw_piece(tet, x, y, win)
-        for offset in self.active_piece.blocks.iter() {
-            let screen_x = self.piece_x + offset.0;
-            let screen_y = self.get_ghost_pos_y() + offset.1;
-
-            if (screen_x as usize) < self.game_win_buf[0].len()
-                && (screen_y as usize) < self.game_win_buf.len()
-            {
-                self.game_win_buf[screen_y as usize][screen_x as usize] = BlockColor::DarkGrey;
-            }
-        }
+        self.game_win_buf.add_piece(
+            self.active_piece,
+            self.piece_x,
+            self.get_ghost_pos_y(),
+            BlockColor::DarkGrey,
+        );
 
         // add active piece
-        for offset in self.active_piece.blocks.iter() {
-            let screen_x = self.piece_x + offset.0;
-            let screen_y = self.piece_y + offset.1;
-
-            if (screen_x as usize) < self.game_win_buf[0].len()
-                && (screen_y as usize) < self.game_win_buf.len()
-            {
-                self.game_win_buf[screen_y as usize][screen_x as usize] = self.active_piece.color;
-            }
-        }
+        self.game_win_buf.add_piece(
+            self.active_piece,
+            self.piece_x,
+            self.piece_y,
+            self.active_piece.color,
+        );
     }
 
     fn update_next_win_buf(&mut self) {
-        self.next_win_buf = [[BlockColor::None; NEXT_BOARD_W]; NEXT_BOARD_H];
-        let pos_x = NEXT_BOARD_W / 3;
-        let pos_y = NEXT_BOARD_H / 3;
+        self.next_win_buf.grid = [[BlockColor::None; NEXT_BOARD_W]; NEXT_BOARD_H];
+        let pos_x = (NEXT_BOARD_W / 3) as i8;
+        let pos_y = (NEXT_BOARD_H / 3) as i8;
 
-        for offset in self.next_piece.blocks.iter() {
-            let screen_x = (pos_x as i8 + offset.0) as usize;
-            let screen_y = (pos_y as i8 + offset.1) as usize;
-
-            if (screen_x) < self.next_win_buf[0].len() && (screen_y) < self.next_win_buf.len() {
-                self.next_win_buf[screen_y][screen_x] = self.next_piece.color;
-            }
-        }
+        self.next_win_buf
+            .add_piece(self.next_piece, pos_x, pos_y, self.next_piece.color);
     }
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 struct Tetromino {
     blocks: [(i8, i8); 4],
     t_type: TetrominoType,
@@ -347,7 +387,7 @@ impl Tetromino {
             TetrominoType::Square => Self {
                 blocks: [(0, 0), (1, 0), (0, 1), (1, 1)],
                 t_type,
-                color: BlockColor::Blue,
+                color: BlockColor::Green,
             },
             TetrominoType::Line => Self {
                 blocks: [(-1, 0), (0, 0), (1, 0), (2, 0)],
@@ -383,7 +423,7 @@ impl Tetromino {
     }
 
     fn get_rotated_copy(&mut self) -> Self {
-        let mut rotated = self.clone();
+        let mut rotated = *self;
         if matches!(rotated.t_type, TetrominoType::Square) {
             return rotated;
         }
@@ -434,26 +474,30 @@ impl Screen {
     fn update_buf<const COLS: usize, const ROWS: usize>(
         &mut self,
         win_type: WinType,
-        board: &[[BlockColor; COLS]; ROWS],
+        board: &Board<COLS, ROWS>,
     ) {
-        let board_cols = board[0].len();
-        let board_rows = board.len();
+        let board_cols = board.width();
+        let board_rows = board.height();
 
         for row in 0..board_rows {
             for col in (0..board_cols).rev() {
-                if matches!(board[row][col], BlockColor::None) {
+                if board.is_cell_empty(col, row) {
                     continue;
                 }
 
                 match win_type {
-                    WinType::Game => {
-                        self.game_win
-                            .add_block(&mut self.buffer, col, row, board[row][col])
-                    }
-                    WinType::Next => {
-                        self.next_win
-                            .add_block(&mut self.buffer, col, row, board[row][col])
-                    }
+                    WinType::Game => self.game_win.add_block(
+                        &mut self.buffer,
+                        col,
+                        row,
+                        board.get(col, row).unwrap_or_default(),
+                    ),
+                    WinType::Next => self.next_win.add_block(
+                        &mut self.buffer,
+                        col,
+                        row,
+                        board.get(col, row).unwrap_or_default(),
+                    ),
                 }
             }
         }
@@ -639,7 +683,6 @@ fn main() -> io::Result<()> {
 
     let mut last_fall_time = Instant::now();
     let mut fall_speed = Duration::from_millis(state.speed);
-    let lock_delay = Duration::from_millis(500);
 
     while state.is_running {
         // -- INPUT --
@@ -652,7 +695,7 @@ fn main() -> io::Result<()> {
         if state.piece_landed() {
             match state.lock_timer {
                 Some(timer) => {
-                    if timer.elapsed() >= lock_delay {
+                    if timer.elapsed() >= state.lock_delay {
                         state.lock_piece();
                         state.clear_line();
                         state.spawn_new_piece();
