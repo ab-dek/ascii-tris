@@ -27,7 +27,7 @@ const GAME_BOARD_WIN_H: usize = GAME_BOARD_H;
 const NEXT_BOARD_WIN_W: usize = NEXT_BOARD_W * 3;
 const NEXT_BOARD_WIN_H: usize = NEXT_BOARD_H;
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 enum TetrominoType {
     #[default]
     Square,
@@ -69,8 +69,19 @@ impl<const W: usize, const H: usize> Board<W, H> {
         H
     }
 
-    fn is_empty(&self, x: usize, y: usize) -> bool {
+    fn is_cell_empty(&self, x: usize, y: usize) -> bool {
         return matches!(self.grid[y][x], BlockColor::None);
+    }
+
+    fn add_piece(&mut self, tet: Tetromino, x: i8, y: i8) {
+        for offset in tet.blocks.iter() {
+            let pos_x = (x + offset.0) as usize;
+            let pos_y = (y + offset.1) as usize;
+
+            if pos_x < self.width() && pos_y < self.height() {
+                self.set(pos_x, pos_y, tet.color);
+            }
+        }
     }
 }
 
@@ -142,10 +153,7 @@ impl GameState {
                 return false;
             }
 
-            if !matches!(
-                self.game_board.grid[ny as usize][nx as usize],
-                BlockColor::None
-            ) {
+            if !self.game_board.is_cell_empty(nx as usize, ny as usize) {
                 return false;
             }
         }
@@ -209,13 +217,14 @@ impl GameState {
             let final_y = offset.1 + self.piece_y;
 
             if final_x >= 0 && final_y >= 0 {
-                self.game_board.grid[final_y as usize][final_x as usize] = self.active_piece.color;
+                self.game_board
+                    .set(final_x as usize, final_y as usize, self.active_piece.color);
             }
         }
     }
 
     fn spawn_new_piece(&mut self) {
-        self.active_piece = self.next_piece.clone();
+        self.active_piece = self.next_piece;
         self.next_piece = self.new_piece();
 
         self.piece_x = (GAME_BOARD_W / 2) as i8 - 1;
@@ -246,7 +255,7 @@ impl GameState {
             let mut is_full = true;
 
             for x in 0..GAME_BOARD_W {
-                if matches!(self.game_board.grid[y][x], BlockColor::None) {
+                if self.game_board.is_cell_empty(x, y) {
                     is_full = false;
                     break;
                 }
@@ -323,60 +332,34 @@ impl GameState {
         self.game_win_buf.grid = [[BlockColor::None; GAME_BOARD_W]; GAME_BOARD_H];
 
         // add locked pieces
-        for x in 0..self.game_board.grid[0].len() {
-            for y in 0..self.game_board.grid.len() {
-                if !matches!(self.game_board.grid[y][x], BlockColor::None) {
-                    self.game_win_buf.grid[y][x] = self.game_board.grid[y][x];
+        for x in 0..self.game_board.width() {
+            for y in 0..self.game_board.height() {
+                if !self.game_board.is_cell_empty(x, y) {
+                    let color_value = self.game_board.get(x, y);
+                    self.game_win_buf.set(x, y, color_value);
                 }
             }
         }
 
         // add ghost piece
-        // TODO: refactor this out into a fn, something like draw_piece(tet, x, y, win)
-        for offset in self.active_piece.blocks.iter() {
-            let screen_x = self.piece_x + offset.0;
-            let screen_y = self.get_ghost_pos_y() + offset.1;
-
-            if (screen_x as usize) < self.game_win_buf.grid[0].len()
-                && (screen_y as usize) < self.game_win_buf.grid.len()
-            {
-                self.game_win_buf.grid[screen_y as usize][screen_x as usize] = BlockColor::DarkGrey;
-            }
-        }
+        self.game_win_buf
+            .add_piece(self.active_piece, self.piece_x, self.get_ghost_pos_y());
 
         // add active piece
-        for offset in self.active_piece.blocks.iter() {
-            let screen_x = self.piece_x + offset.0;
-            let screen_y = self.piece_y + offset.1;
-
-            if (screen_x as usize) < self.game_win_buf.grid[0].len()
-                && (screen_y as usize) < self.game_win_buf.grid.len()
-            {
-                self.game_win_buf.grid[screen_y as usize][screen_x as usize] =
-                    self.active_piece.color;
-            }
-        }
+        self.game_win_buf
+            .add_piece(self.active_piece, self.piece_x, self.piece_y);
     }
 
     fn update_next_win_buf(&mut self) {
         self.next_win_buf.grid = [[BlockColor::None; NEXT_BOARD_W]; NEXT_BOARD_H];
-        let pos_x = NEXT_BOARD_W / 3;
-        let pos_y = NEXT_BOARD_H / 3;
+        let pos_x = (NEXT_BOARD_W / 3) as i8;
+        let pos_y = (NEXT_BOARD_H / 3) as i8;
 
-        for offset in self.next_piece.blocks.iter() {
-            let screen_x = (pos_x as i8 + offset.0) as usize;
-            let screen_y = (pos_y as i8 + offset.1) as usize;
-
-            if (screen_x) < self.next_win_buf.grid[0].len()
-                && (screen_y) < self.next_win_buf.grid.len()
-            {
-                self.next_win_buf.grid[screen_y][screen_x] = self.next_piece.color;
-            }
-        }
+        self.next_win_buf.add_piece(self.next_piece, pos_x, pos_y);
     }
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 struct Tetromino {
     blocks: [(i8, i8); 4],
     t_type: TetrominoType,
@@ -478,23 +461,23 @@ impl Screen {
         win_type: WinType,
         board: &Board<COLS, ROWS>,
     ) {
-        let board_cols = board.grid[0].len();
-        let board_rows = board.grid.len();
+        let board_cols = board.width();
+        let board_rows = board.height();
 
         for row in 0..board_rows {
             for col in (0..board_cols).rev() {
-                if matches!(board.grid[row][col], BlockColor::None) {
+                if board.is_cell_empty(col, row) {
                     continue;
                 }
 
                 match win_type {
                     WinType::Game => {
                         self.game_win
-                            .add_block(&mut self.buffer, col, row, board.grid[row][col])
+                            .add_block(&mut self.buffer, col, row, board.get(col, row))
                     }
                     WinType::Next => {
                         self.next_win
-                            .add_block(&mut self.buffer, col, row, board.grid[row][col])
+                            .add_block(&mut self.buffer, col, row, board.get(col, row))
                     }
                 }
             }
